@@ -9,4 +9,11 @@ metadata:
     app.kubernetes.io/created-by: application-controller
   name: application-sample
 spec:
-  # TODO(user): Add fields here
+  image:
+    repository: "git.home.yarotsky.me/vlad/dashboard"
+    versionStrategy: "digest"
+    digest:
+      tag: "v0.1.0"
+  ports:
+  - name: "http"
+    containerPort: 8080

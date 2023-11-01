@@ -29,11 +29,11 @@ type ImageSpec struct {
 	// Version selection strategy, e.g. `digest`.
 	// Available strategies:
 	// - `digest` - looks for the most recently uploaded digest of a mutable tag
-	VersionStrategy           string                    `json:"versionStrategy"`
-	VersionStrategyDigestSpec VersionStrategyDigestSpec `json:"digest,omitempty"`
+	VersionStrategy string                `json:"versionStrategy"`
+	Digest          VersionStrategyDigest `json:"digest,omitempty"`
 }
 
-type VersionStrategyDigestSpec struct {
+type VersionStrategyDigest struct {
 	// Mutable tag to watch for new digests.
 	Tag string `json:"tag"`
 }
