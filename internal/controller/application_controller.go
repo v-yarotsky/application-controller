@@ -48,7 +48,7 @@ type ApplicationReconciler struct {
 //+kubebuilder:rbac:groups=apps,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=networking,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -309,6 +309,9 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&yarotskymev1alpha1.Application{}).
-		Owns(&appsv1.Deployment{}). // Trigger reconciliation whenever an owned Deployment is changed.
+		Owns(&appsv1.Deployment{}).     // Trigger reconciliation whenever an owned Deployment is changed.
+		Owns(&corev1.Service{}).        // Trigger reconciliation whenever an owned Service is changed.
+		Owns(&corev1.ServiceAccount{}). // Trigger reconciliation whenever an owned AccountService is changed.
+		Owns(&networkingv1.Ingress{}).  // Trigger reconciliation whenever an owned Ingress is changed.
 		Complete(r)
 }
