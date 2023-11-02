@@ -20,6 +20,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 type ImageSpec struct {
@@ -132,7 +133,7 @@ type ApplicationSpec struct {
 	// +patchStrategy=merge,retainKeys
 	Volumes []Volume `json:"volumes,omitempty"`
 
-	Ingress Ingress `json:"ingress,omitempty"`
+	Ingress *Ingress `json:"ingress,omitempty"`
 
 	Metrics Metrics `json:"metrics,omitempty"`
 
@@ -208,6 +209,43 @@ type Application struct {
 
 	Spec   ApplicationSpec   `json:"spec,omitempty"`
 	Status ApplicationStatus `json:"status,omitempty"`
+}
+
+func (a *Application) DeploymentName() types.NamespacedName {
+	return types.NamespacedName{
+		Name:      a.Name,
+		Namespace: a.Namespace,
+	}
+}
+
+func (a *Application) SelectorLabels() map[string]string {
+	return map[string]string{
+		"app.kubernetes.io/name":       a.Name,
+		"app.kubernetes.io/managed-by": "application-controller",
+		"app.kubernetes.io/instance":   "default",
+		"app.kubernetes.io/version":    "0.1.0",
+	}
+}
+
+func (a *Application) ServiceAccountName() types.NamespacedName {
+	return types.NamespacedName{
+		Name:      a.Name,
+		Namespace: a.Namespace,
+	}
+}
+
+func (a *Application) ServiceName() types.NamespacedName {
+	return types.NamespacedName{
+		Name:      a.Name,
+		Namespace: a.Namespace,
+	}
+}
+
+func (a *Application) IngressName() types.NamespacedName {
+	return types.NamespacedName{
+		Name:      a.Name,
+		Namespace: a.Namespace,
+	}
 }
 
 //+kubebuilder:object:root=true

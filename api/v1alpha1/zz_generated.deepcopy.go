@@ -139,7 +139,11 @@ func (in *ApplicationSpec) DeepCopyInto(out *ApplicationSpec) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
-	in.Ingress.DeepCopyInto(&out.Ingress)
+	if in.Ingress != nil {
+		in, out := &in.Ingress, &out.Ingress
+		*out = new(Ingress)
+		(*in).DeepCopyInto(*out)
+	}
 	out.Metrics = in.Metrics
 	if in.Roles != nil {
 		in, out := &in.Roles, &out.Roles

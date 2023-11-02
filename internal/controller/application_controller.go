@@ -22,6 +22,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -30,6 +31,7 @@ import (
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -66,11 +68,27 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
+	if err := r.ensureServiceAccount(ctx, &app); err != nil {
+		log.Error(err, "failed to ensure a ServiceAccount exists for the Application")
+		return ctrl.Result{}, err
+	}
+
 	if err := r.ensureDeployment(ctx, &app); err != nil {
 		log.Error(err, "failed to ensure a Deployment exists for the Application")
 		return ctrl.Result{}, err
 	}
 
+	if err := r.ensureService(ctx, &app); err != nil {
+		log.Error(err, "failed to ensure a Service exists for the Application")
+		return ctrl.Result{}, err
+	}
+
+	if err := r.ensureIngress(ctx, &app); err != nil {
+		log.Error(err, "failed to ensure a Ingress exists for the Application")
+		return ctrl.Result{}, err
+	}
+
+	log.Info("Application should be provisioned")
 	return ctrl.Result{}, nil
 }
 
@@ -78,16 +96,13 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 	log := log.FromContext(ctx)
 
 	var wantDeploy appsv1.Deployment
-	selectorLabels := map[string]string{
-		"app.kubernetes.io/name":       app.Name,
-		"app.kubernetes.io/managed-by": "application-controller",
-		"app.kubernetes.io/instance":   "default",
-		"app.kubernetes.io/version":    "0.1.0",
-	}
+	selectorLabels := app.SelectorLabels()
+
+	deployName := app.DeploymentName()
 	wantDeploy = appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      app.Name,
-			Namespace: app.Namespace,
+			Name:      deployName.Name,
+			Namespace: deployName.Namespace,
 		},
 		Spec: appsv1.DeploymentSpec{
 			Selector: &metav1.LabelSelector{
@@ -98,6 +113,7 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 					Labels: selectorLabels,
 				},
 				Spec: corev1.PodSpec{
+					ServiceAccountName: app.ServiceAccountName().Name,
 					Containers: []corev1.Container{
 						{
 							Name:            app.Name,
@@ -128,7 +144,7 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 	if err := r.Get(ctx, client.ObjectKeyFromObject(&wantDeploy), &gotDeploy); err != nil {
 		if errors.IsNotFound(err) {
 			log.Info("Deployment not found for Application. Creating.")
-			r.Create(ctx, &wantDeploy)
+			return r.Create(ctx, &wantDeploy)
 		}
 		log.Error(err, "Failed to retrieve Deployment for Application")
 		return err
@@ -136,6 +152,156 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 
 	// deployment was found
 	// check for diff and do r.Update(ctx, gotDeploy)
+	return nil
+}
+
+func (r *ApplicationReconciler) ensureServiceAccount(ctx context.Context, app *yarotskymev1alpha1.Application) error {
+	log := log.FromContext(ctx)
+
+	serviceAccountName := app.ServiceAccountName()
+
+	var wantServiceAccount corev1.ServiceAccount
+	wantServiceAccount = corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      serviceAccountName.Name,
+			Namespace: serviceAccountName.Namespace,
+		},
+	}
+	if err := controllerutil.SetControllerReference(app, &wantServiceAccount, r.Scheme); err != nil {
+		log.Error(err, "failed to set controller reference on ServiceAccount")
+		return err
+	}
+
+	gotServiceAccount := corev1.ServiceAccount{}
+
+	if err := r.Get(ctx, client.ObjectKeyFromObject(&wantServiceAccount), &gotServiceAccount); err != nil {
+		if errors.IsNotFound(err) {
+			log.Info("ServiceAccount not found for Application. Creating.")
+			return r.Create(ctx, &wantServiceAccount)
+		}
+		log.Error(err, "Failed to retrieve ServiceAccount for Application")
+		return err
+	}
+
+	return nil
+}
+
+func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotskymev1alpha1.Application) error {
+	log := log.FromContext(ctx)
+
+	serviceName := app.ServiceName()
+
+	var wantService corev1.Service
+	ports := make([]corev1.ServicePort, 0, len(app.Spec.Ports))
+	for _, p := range app.Spec.Ports {
+		ports = append(ports, corev1.ServicePort{
+			Name:       p.Name,
+			TargetPort: intstr.FromString(p.Name),
+			Protocol:   p.Protocol,
+			Port:       p.ContainerPort,
+		})
+	}
+	wantService = corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      serviceName.Name,
+			Namespace: serviceName.Namespace,
+		},
+		Spec: corev1.ServiceSpec{
+			Selector: app.SelectorLabels(),
+			Ports:    ports,
+		},
+	}
+	if err := controllerutil.SetControllerReference(app, &wantService, r.Scheme); err != nil {
+		log.Error(err, "failed to set controller reference on Service")
+		return err
+	}
+
+	gotService := corev1.Service{}
+
+	if err := r.Get(ctx, client.ObjectKeyFromObject(&wantService), &gotService); err != nil {
+		if errors.IsNotFound(err) {
+			log.Info("Service not found for Application. Creating.")
+			return r.Create(ctx, &wantService)
+		}
+		log.Error(err, "Failed to retrieve Service for Application")
+		return err
+	}
+
+	return nil
+}
+
+func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotskymev1alpha1.Application) error {
+	log := log.FromContext(ctx)
+
+	if app.Spec.Ingress == nil {
+		log.Info("Application does not specify Ingress, skipping Ingress creation.")
+		return nil
+	}
+
+	ingressName := app.IngressName()
+	portName := app.Spec.Ingress.PortName
+	if portName == "" {
+		for _, p := range app.Spec.Ports {
+			if p.Name == "http" {
+				portName = "http"
+				break
+			}
+		}
+	}
+	if portName == "" {
+		return fmt.Errorf(`Could not find the port for Ingress. Either specify one explicitly, or ensure there's a port named "http" or "web"`)
+	}
+	pathType := networkingv1.PathTypeImplementationSpecific
+
+	var wantIngress networkingv1.Ingress
+	wantIngress = networkingv1.Ingress{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ingressName.Name,
+			Namespace: ingressName.Namespace,
+		},
+		Spec: networkingv1.IngressSpec{
+			IngressClassName: app.Spec.Ingress.IngressClassName,
+			Rules: []networkingv1.IngressRule{
+				{
+					Host: app.Spec.Ingress.Host,
+					IngressRuleValue: networkingv1.IngressRuleValue{
+						HTTP: &networkingv1.HTTPIngressRuleValue{
+							Paths: []networkingv1.HTTPIngressPath{
+								{
+									Path:     "/",
+									PathType: &pathType,
+									Backend: networkingv1.IngressBackend{
+										Service: &networkingv1.IngressServiceBackend{
+											Name: app.ServiceName().Name,
+											Port: networkingv1.ServiceBackendPort{
+												Name: portName,
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	if err := controllerutil.SetControllerReference(app, &wantIngress, r.Scheme); err != nil {
+		log.Error(err, "failed to set controller reference on Ingress")
+		return err
+	}
+
+	gotIngress := networkingv1.Ingress{}
+
+	if err := r.Get(ctx, client.ObjectKeyFromObject(&wantIngress), &gotIngress); err != nil {
+		if errors.IsNotFound(err) {
+			log.Info("Ingress not found for Application. Creating.")
+			return r.Create(ctx, &wantIngress)
+		}
+		log.Error(err, "Failed to retrieve Ingress for Application")
+		return err
+	}
+
 	return nil
 }
 
