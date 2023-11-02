@@ -49,16 +49,28 @@ var _ = Describe("Application controller", func() {
 						IngressClassName: pointer.String("traefik"),
 						Host:             "dashboard.home.yarotsky.me",
 					},
-					Roles: []rbacv1.RoleRef{
+					Roles: []yarotskymev1alpha1.ScopedRoleRef{
 						{
-							APIGroup: "rbac.authorization.k8s.io",
-							Kind:     "ClusterRole",
-							Name:     "my-cluster-role",
+							RoleRef: rbacv1.RoleRef{
+								APIGroup: "rbac.authorization.k8s.io",
+								Kind:     "ClusterRole",
+								Name:     "my-cluster-role",
+							},
+							Scope: yarotskymev1alpha1.RoleBindingScopePointer(yarotskymev1alpha1.RoleBindingScopeCluster),
 						},
 						{
-							APIGroup: "rbac.authorization.k8s.io",
-							Kind:     "Role",
-							Name:     "my-role",
+							RoleRef: rbacv1.RoleRef{
+								APIGroup: "rbac.authorization.k8s.io",
+								Kind:     "ClusterRole",
+								Name:     "my-cluster-role-for-namespace",
+							},
+						},
+						{
+							RoleRef: rbacv1.RoleRef{
+								APIGroup: "rbac.authorization.k8s.io",
+								Kind:     "Role",
+								Name:     "my-role",
+							},
 						},
 					},
 				},
@@ -76,9 +88,32 @@ var _ = Describe("Application controller", func() {
 				g.Expect(err).NotTo(HaveOccurred())
 			}).WithContext(ctx).Should(Succeed())
 
+			By("Creating cluster role bindings for ClusterRoles")
+			clusterRoleBindingNameForClusterRole := types.NamespacedName{
+				Name: "app1-clusterrole-my-cluster-role",
+			}
+			var clusterRoleBindingForClusterRole rbacv1.ClusterRoleBinding
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, clusterRoleBindingNameForClusterRole, &clusterRoleBindingForClusterRole)
+				g.Expect(err).NotTo(HaveOccurred())
+
+				g.Expect(clusterRoleBindingForClusterRole.Subjects).To(ContainElement(rbacv1.Subject{
+					APIGroup:  "",
+					Kind:      "ServiceAccount",
+					Name:      serviceAccountName.Name,
+					Namespace: serviceAccountName.Namespace,
+				}))
+
+				g.Expect(clusterRoleBindingForClusterRole.RoleRef).To(Equal(rbacv1.RoleRef{
+					APIGroup: "rbac.authorization.k8s.io",
+					Kind:     "ClusterRole",
+					Name:     "my-cluster-role",
+				}))
+			}).WithContext(ctx).Should(Succeed())
+
 			By("Creating role bindings for ClusterRoles")
 			roleBindingNameForClusterRole := types.NamespacedName{
-				Name:      "app1-clusterrole-my-cluster-role",
+				Name:      "app1-clusterrole-my-cluster-role-for-namespace",
 				Namespace: app.Namespace,
 			}
 			var roleBindingForClusterRole rbacv1.RoleBinding
@@ -96,7 +131,7 @@ var _ = Describe("Application controller", func() {
 				g.Expect(roleBindingForClusterRole.RoleRef).To(Equal(rbacv1.RoleRef{
 					APIGroup: "rbac.authorization.k8s.io",
 					Kind:     "ClusterRole",
-					Name:     "my-cluster-role",
+					Name:     "my-cluster-role-for-namespace",
 				}))
 			}).WithContext(ctx).Should(Succeed())
 

@@ -50,6 +50,10 @@ type ApplicationReconciler struct {
 //+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=bind
+//+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=bind
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -197,40 +201,80 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 	for _, roleRef := range app.Spec.Roles {
 		log = log.WithValues("kind", roleRef.Kind, "name", roleRef.Name)
 
-		name, err := app.RoleBindingNameForRoleRef(roleRef)
+		name, err := app.RoleBindingNameForRoleRef(roleRef.RoleRef)
 		if err != nil {
 			return err
 		}
 
-		wantRoleBinding := rbacv1.RoleBinding{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name.Name,
-				Namespace: name.Namespace,
-			},
-			Subjects: []rbacv1.Subject{
-				{
-					APIGroup:  "",
-					Kind:      "ServiceAccount",
-					Name:      serviceAccountName.Name,
-					Namespace: serviceAccountName.Namespace,
+		scope := yarotskymev1alpha1.RoleBindingScopeNamespace
+		if roleRef.Scope != nil {
+			scope = *roleRef.Scope
+		}
+
+		if scope == yarotskymev1alpha1.RoleBindingScopeNamespace {
+			want := rbacv1.RoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name.Name,
+					Namespace: name.Namespace,
 				},
-			},
-			RoleRef: roleRef,
-		}
-
-		if err := controllerutil.SetControllerReference(app, &wantRoleBinding, r.Scheme); err != nil {
-			log.Error(err, "failed to set controller reference on RoleBinding")
-			return err
-		}
-
-		gotRoleBinding := rbacv1.RoleBinding{}
-		if err := r.Get(ctx, client.ObjectKeyFromObject(&wantRoleBinding), &gotRoleBinding); err != nil {
-			if errors.IsNotFound(err) {
-				log.Info("RoleBinding not found for Application. Creating.")
-				return r.Create(ctx, &wantRoleBinding)
+				Subjects: []rbacv1.Subject{
+					{
+						APIGroup:  "",
+						Kind:      "ServiceAccount",
+						Name:      serviceAccountName.Name,
+						Namespace: serviceAccountName.Namespace,
+					},
+				},
+				RoleRef: roleRef.RoleRef,
 			}
-			log.Error(err, "Failed to retrieve RoleBinding for Application")
-			return err
+
+			if err := controllerutil.SetControllerReference(app, &want, r.Scheme); err != nil {
+				log.Error(err, "failed to set controller reference on RoleBinding")
+				return err
+			}
+
+			got := rbacv1.RoleBinding{}
+			if err := r.Get(ctx, client.ObjectKeyFromObject(&want), &got); err != nil {
+				if errors.IsNotFound(err) {
+					log.Info("RoleBinding not found for Application. Creating.")
+					return r.Create(ctx, &want)
+				}
+				log.Error(err, "Failed to retrieve RoleBinding for Application")
+				return err
+			}
+		} else if scope == yarotskymev1alpha1.RoleBindingScopeCluster {
+			if !(roleRef.APIGroup == "rbac.authorization.k8s.io" && roleRef.Kind == "ClusterRole") {
+				err := fmt.Errorf("ClusterRoleBindings can only be created for ClusterRoles")
+				log.Error(err, "Failed to create ClusterRoleBinding")
+				return err
+			}
+			want := rbacv1.ClusterRoleBinding{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: name.Name,
+				},
+				Subjects: []rbacv1.Subject{
+					{
+						APIGroup:  "",
+						Kind:      "ServiceAccount",
+						Name:      serviceAccountName.Name,
+						Namespace: serviceAccountName.Namespace,
+					},
+				},
+				RoleRef: roleRef.RoleRef,
+			}
+
+			// TODO ensure we clean up ClusterRoleBindings; can't use owner trackign due
+			// to `cluster-scoped resource must not have a namespace-scoped owner, owner's namespace default`
+
+			got := rbacv1.ClusterRoleBinding{}
+			if err := r.Get(ctx, client.ObjectKeyFromObject(&want), &got); err != nil {
+				if errors.IsNotFound(err) {
+					log.Info("ClusterRoleBinding not found for Application. Creating.")
+					return r.Create(ctx, &want)
+				}
+				log.Error(err, "Failed to retrieve ClusterRoleBinding for Application")
+				return err
+			}
 		}
 	}
 

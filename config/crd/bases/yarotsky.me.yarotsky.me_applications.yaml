@@ -619,8 +619,6 @@ spec:
                 type: object
               roles:
                 items:
-                  description: RoleRef contains information that points to the role
-                    being used
                   properties:
                     apiGroup:
                       description: APIGroup is the group for the resource being referenced
@@ -630,6 +628,11 @@ spec:
                       type: string
                     name:
                       description: Name is the name of resource being referenced
+                      type: string
+                    scope:
+                      description: RoleBindingScope determines whether a namespaced
+                        RoleBinding or a cluster-scoped ClusterRoleBinding is created
+                        when referring to a ClusterRole.
                       type: string
                   required:
                   - apiGroup

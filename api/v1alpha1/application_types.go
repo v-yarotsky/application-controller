@@ -139,7 +139,27 @@ type ApplicationSpec struct {
 
 	Metrics Metrics `json:"metrics,omitempty"`
 
-	Roles []rbacv1.RoleRef `json:"roles,omitempty"`
+	Roles []ScopedRoleRef `json:"roles,omitempty"`
+}
+
+// RoleBindingScope determines whether a namespaced RoleBinding
+// or a cluster-scoped ClusterRoleBinding is created when referring
+// to a ClusterRole.
+// +enum
+type RoleBindingScope string
+
+const (
+	RoleBindingScopeNamespace = RoleBindingScope("namespace")
+	RoleBindingScopeCluster   = RoleBindingScope("cluster")
+)
+
+type ScopedRoleRef struct {
+	rbacv1.RoleRef `json:",inline"`
+	Scope          *RoleBindingScope `json:"scope,omitempty"`
+}
+
+func RoleBindingScopePointer(s RoleBindingScope) *RoleBindingScope {
+	return &s
 }
 
 type Volume struct {
