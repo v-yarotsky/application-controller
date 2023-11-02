@@ -1,6 +1,15 @@
 # application-controller
 // TODO(user): Add simple overview of use/purpose
 
+# TODO
+
+- [ ] Automatically update docker images of Applications.
+- [ ] Expose meaningful status on the `Application` CR.
+- [ ] Expose status transitions on the `Application` CR (e.g. when we're updating the image).
+- [ ] Garbage-collect `ClusterRoleBinding` objects (they cannot be auto-removed via ownership relationship).
+- [ ] E2E tests.
+- [ ] Allow configuration of default Ingress annotations via controller config.
+
 ## Description
 // TODO(user): An in-depth paragraph about your project and overview of use
 
@@ -91,4 +100,3 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
