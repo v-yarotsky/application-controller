@@ -32,6 +32,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -52,10 +53,6 @@ type ApplicationReconciler struct {
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the Application object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.16.0/pkg/reconcile
@@ -70,6 +67,11 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	if err := r.ensureServiceAccount(ctx, &app); err != nil {
 		log.Error(err, "failed to ensure a ServiceAccount exists for the Application")
+		return ctrl.Result{}, err
+	}
+
+	if err := r.ensureRoleBindings(ctx, &app); err != nil {
+		log.Error(err, "failed to ensure a RoleBindings exists for the Application")
 		return ctrl.Result{}, err
 	}
 
@@ -181,6 +183,55 @@ func (r *ApplicationReconciler) ensureServiceAccount(ctx context.Context, app *y
 		}
 		log.Error(err, "Failed to retrieve ServiceAccount for Application")
 		return err
+	}
+
+	return nil
+}
+
+func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application) error {
+	log := log.FromContext(ctx)
+
+	serviceAccountName := app.ServiceAccountName()
+
+	// TODO this actually needs to make sure to delete rolebindings, too
+	for _, roleRef := range app.Spec.Roles {
+		log = log.WithValues("kind", roleRef.Kind, "name", roleRef.Name)
+
+		name, err := app.RoleBindingNameForRoleRef(roleRef)
+		if err != nil {
+			return err
+		}
+
+		wantRoleBinding := rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name.Name,
+				Namespace: name.Namespace,
+			},
+			Subjects: []rbacv1.Subject{
+				{
+					APIGroup:  "",
+					Kind:      "ServiceAccount",
+					Name:      serviceAccountName.Name,
+					Namespace: serviceAccountName.Namespace,
+				},
+			},
+			RoleRef: roleRef,
+		}
+
+		if err := controllerutil.SetControllerReference(app, &wantRoleBinding, r.Scheme); err != nil {
+			log.Error(err, "failed to set controller reference on RoleBinding")
+			return err
+		}
+
+		gotRoleBinding := rbacv1.RoleBinding{}
+		if err := r.Get(ctx, client.ObjectKeyFromObject(&wantRoleBinding), &gotRoleBinding); err != nil {
+			if errors.IsNotFound(err) {
+				log.Info("RoleBinding not found for Application. Creating.")
+				return r.Create(ctx, &wantRoleBinding)
+			}
+			log.Error(err, "Failed to retrieve RoleBinding for Application")
+			return err
+		}
 	}
 
 	return nil
@@ -313,5 +364,6 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.Service{}).        // Trigger reconciliation whenever an owned Service is changed.
 		Owns(&corev1.ServiceAccount{}). // Trigger reconciliation whenever an owned AccountService is changed.
 		Owns(&networkingv1.Ingress{}).  // Trigger reconciliation whenever an owned Ingress is changed.
+		Owns(&rbacv1.RoleBinding{}).    // Trigger reconciliation whenever an owned RoleBinding is changed.
 		Complete(r)
 }

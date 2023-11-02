@@ -8,6 +8,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -48,6 +49,18 @@ var _ = Describe("Application controller", func() {
 						IngressClassName: pointer.String("traefik"),
 						Host:             "dashboard.home.yarotsky.me",
 					},
+					Roles: []rbacv1.RoleRef{
+						{
+							APIGroup: "rbac.authorization.k8s.io",
+							Kind:     "ClusterRole",
+							Name:     "my-cluster-role",
+						},
+						{
+							APIGroup: "rbac.authorization.k8s.io",
+							Kind:     "Role",
+							Name:     "my-role",
+						},
+					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
@@ -61,6 +74,54 @@ var _ = Describe("Application controller", func() {
 			Eventually(func(g Gomega) {
 				err := k8sClient.Get(ctx, serviceAccountName, &serviceAccount)
 				g.Expect(err).NotTo(HaveOccurred())
+			}).WithContext(ctx).Should(Succeed())
+
+			By("Creating role bindings for ClusterRoles")
+			roleBindingNameForClusterRole := types.NamespacedName{
+				Name:      "app1-clusterrole-my-cluster-role",
+				Namespace: app.Namespace,
+			}
+			var roleBindingForClusterRole rbacv1.RoleBinding
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, roleBindingNameForClusterRole, &roleBindingForClusterRole)
+				g.Expect(err).NotTo(HaveOccurred())
+
+				g.Expect(roleBindingForClusterRole.Subjects).To(ContainElement(rbacv1.Subject{
+					APIGroup:  "",
+					Kind:      "ServiceAccount",
+					Name:      serviceAccountName.Name,
+					Namespace: serviceAccountName.Namespace,
+				}))
+
+				g.Expect(roleBindingForClusterRole.RoleRef).To(Equal(rbacv1.RoleRef{
+					APIGroup: "rbac.authorization.k8s.io",
+					Kind:     "ClusterRole",
+					Name:     "my-cluster-role",
+				}))
+			}).WithContext(ctx).Should(Succeed())
+
+			By("Creating role bindings for Roles")
+			roleBindingNameForRole := types.NamespacedName{
+				Name:      "app1-role-my-role",
+				Namespace: app.Namespace,
+			}
+			var roleBindingForRole rbacv1.RoleBinding
+			Eventually(func(g Gomega) {
+				err := k8sClient.Get(ctx, roleBindingNameForRole, &roleBindingForRole)
+				g.Expect(err).NotTo(HaveOccurred())
+
+				g.Expect(roleBindingForRole.Subjects).To(ContainElement(rbacv1.Subject{
+					APIGroup:  "",
+					Kind:      "ServiceAccount",
+					Name:      serviceAccountName.Name,
+					Namespace: serviceAccountName.Namespace,
+				}))
+
+				g.Expect(roleBindingForRole.RoleRef).To(Equal(rbacv1.RoleRef{
+					APIGroup: "rbac.authorization.k8s.io",
+					Kind:     "Role",
+					Name:     "my-role",
+				}))
 			}).WithContext(ctx).Should(Succeed())
 
 			By("Creating a deployment")
@@ -141,6 +202,6 @@ var _ = Describe("Application controller", func() {
 					},
 				}))
 			}).WithContext(ctx).Should(Succeed())
-		}, SpecTimeout(10*time.Second))
+		}, SpecTimeout(5*time.Second))
 	})
 })

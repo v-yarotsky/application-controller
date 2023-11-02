@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -245,6 +247,22 @@ func (a *Application) IngressName() types.NamespacedName {
 	return types.NamespacedName{
 		Name:      a.Name,
 		Namespace: a.Namespace,
+	}
+}
+
+func (a *Application) RoleBindingNameForRoleRef(roleRef rbacv1.RoleRef) (types.NamespacedName, error) {
+	if roleRef.APIGroup == "rbac.authorization.k8s.io" && roleRef.Kind == "ClusterRole" {
+		return types.NamespacedName{
+			Name:      fmt.Sprintf("%s-%s-%s", a.Name, "clusterrole", roleRef.Name),
+			Namespace: a.Namespace,
+		}, nil
+	} else if roleRef.APIGroup == "rbac.authorization.k8s.io" && roleRef.Kind == "Role" {
+		return types.NamespacedName{
+			Name:      fmt.Sprintf("%s-%s-%s", a.Name, "role", roleRef.Name),
+			Namespace: a.Namespace,
+		}, nil
+	} else {
+		return types.NamespacedName{}, fmt.Errorf("Cannot create role binding name for %s/%s", roleRef.APIGroup, roleRef.Kind)
 	}
 }
 
