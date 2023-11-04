@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
+	"git.home.yarotsky.me/vlad/application-controller/internal/k8s"
 	"github.com/google/go-containerregistry/pkg/authn"
 	kubeauth "github.com/google/go-containerregistry/pkg/authn/kubernetes"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -30,14 +31,18 @@ func NewImageFinder(opts ...Option) (*imageFinder, error) {
 
 type Option func(*config) error
 
-func WithInClusterRegistryAuth() Option {
+func WithInClusterRegistryAuth(imagePullSecrets []string) Option {
 	return func(opts *config) error {
+		namespace, err := k8s.CurrentNamespace()
+		if err != nil {
+			return fmt.Errorf("failed to read current namespace: %w", err)
+		}
+
 		// If cloud auth is needed, use github.com/google/go-containerregistry/pkg/authn/k8schain instead
 		kc, err := kubeauth.NewInCluster(context.Background(), kubeauth.Options{
-			// TODO: unhardcode this
-			Namespace:          "application-controller-system",
+			Namespace:          namespace,
 			ServiceAccountName: kubeauth.NoServiceAccount,
-			ImagePullSecrets:   []string{"regcred"},
+			ImagePullSecrets:   imagePullSecrets,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to obtain image registry authn keychain: %w", err)

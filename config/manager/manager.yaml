@@ -70,6 +70,7 @@ spec:
         - /manager
         args:
         - --leader-elect
+        - --image-pull-secret=regcred
         image: controller:latest
         name: manager
         securityContext:
