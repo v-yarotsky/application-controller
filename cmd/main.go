@@ -28,12 +28,14 @@ import (
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
 	"git.home.yarotsky.me/vlad/application-controller/internal/controller"
+	"git.home.yarotsky.me/vlad/application-controller/internal/images"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -89,9 +91,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	imageFinder, err := images.NewImageFinder(images.WithInClusterRegistryAuth())
+	if err != nil {
+		setupLog.Error(err, "failed to instantiate image finder")
+		os.Exit(1)
+	}
+
+	imageUpdateEvents := make(chan event.GenericEvent)
+
 	if err = (&controller.ApplicationReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		ImageFinder:       imageFinder,
+		ImageUpdateEvents: imageUpdateEvents,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Application")
 		os.Exit(1)
@@ -107,8 +119,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	ctx := ctrl.SetupSignalHandler()
+
+	setupLog.Info("starting application update watcher")
+	applicationWatcher := images.NewSillyImageWatcher(mgr.GetClient())
+	go applicationWatcher.WatchForNewImages(ctx, imageUpdateEvents)
+
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}

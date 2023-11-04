@@ -43,7 +43,7 @@ import (
 // ApplicationReconciler reconciles a Application object
 type ApplicationReconciler struct {
 	ImageFinder       images.ImageFinder
-	imageUpdateEvents chan event.GenericEvent
+	ImageUpdateEvents chan event.GenericEvent
 	client.Client
 	Scheme *runtime.Scheme
 }
@@ -432,7 +432,7 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&networkingv1.Ingress{}).  // Trigger reconciliation whenever an owned Ingress is changed.
 		Owns(&rbacv1.RoleBinding{}).    // Trigger reconciliation whenever an owned RoleBinding is changed.
 		WatchesRawSource(
-			&source.Channel{Source: r.imageUpdateEvents},
+			&source.Channel{Source: r.ImageUpdateEvents},
 			&handler.EnqueueRequestForObject{},
 		).
 		Complete(r)

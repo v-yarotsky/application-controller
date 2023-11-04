@@ -19,7 +19,7 @@ func TestImageFinder(t *testing.T) {
 
 	oldFoo := s.MustUpsertTag("foo", "latest")
 
-	finder, err := images.NewImageFinder(ctx)
+	finder, err := images.NewImageFinder()
 	g.Expect(err).NotTo(HaveOccurred())
 
 	versionSpec := yarotskymev1alpha1.ImageSpec{

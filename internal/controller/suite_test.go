@@ -97,7 +97,7 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).ToNot(HaveOccurred())
 
-	imageFinder, err := images.NewImageFinder(ctx)
+	imageFinder, err := images.NewImageFinder()
 	Expect(err).ToNot(HaveOccurred())
 
 	imageUpdateEvents = make(chan event.GenericEvent)
@@ -105,7 +105,7 @@ var _ = BeforeSuite(func() {
 		Client:            k8sManager.GetClient(),
 		Scheme:            k8sManager.GetScheme(),
 		ImageFinder:       imageFinder,
-		imageUpdateEvents: imageUpdateEvents,
+		ImageUpdateEvents: imageUpdateEvents,
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 

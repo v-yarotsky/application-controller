@@ -11,18 +11,13 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
 
-type Image struct {
-	yarotskymev1alpha1.ImageSpec
-	Ref string
-}
-
 type ImageFinder interface {
 	// FindImage takes an image version tracking spec, and returns
 	// a new image reference.
 	FindImage(ctx context.Context, spec yarotskymev1alpha1.ImageSpec) (string, error)
 }
 
-func NewImageFinder(ctx context.Context, opts ...Option) (*imageFinder, error) {
+func NewImageFinder(opts ...Option) (*imageFinder, error) {
 	cfg := &config{}
 	for _, opt := range opts {
 		err := opt(cfg)
