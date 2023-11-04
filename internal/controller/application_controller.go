@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -44,6 +45,7 @@ import (
 type ApplicationReconciler struct {
 	ImageFinder               images.ImageFinder
 	ImageUpdateEvents         chan event.GenericEvent
+	DefaultIngressClassName   string
 	DefaultIngressAnnotations map[string]string
 	client.Client
 	Scheme *runtime.Scheme
@@ -371,6 +373,14 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 	}
 	pathType := networkingv1.PathTypeImplementationSpecific
 
+	ingressClassName := app.Spec.Ingress.IngressClassName
+	if ingressClassName == nil {
+		if r.DefaultIngressClassName == "" {
+			return fmt.Errorf("ingress.ingressClassName is not specified, and --ingress-class is not set.")
+		}
+		ingressClassName = pointer.String(r.DefaultIngressClassName)
+	}
+
 	var wantIngress networkingv1.Ingress
 	wantIngress = networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
@@ -379,7 +389,7 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 			Annotations: r.DefaultIngressAnnotations,
 		},
 		Spec: networkingv1.IngressSpec{
-			IngressClassName: app.Spec.Ingress.IngressClassName,
+			IngressClassName: ingressClassName,
 			Rules: []networkingv1.IngressRule{
 				{
 					Host: app.Spec.Ingress.Host,

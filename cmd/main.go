@@ -57,6 +57,7 @@ func main() {
 	var enableLeaderElection bool
 	var probeAddr string
 	var imagePullSecrets flagext.StringSlice
+	var ingressClass string
 	var ingressAnnotations flagext.JSONStringMap
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
@@ -65,6 +66,7 @@ func main() {
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.Var(&imagePullSecrets, "image-pull-secret", "name of a Secret with image registry credentials.")
+	flag.StringVar(&ingressClass, "ingress-class", "", "Default IngressClass.")
 	flag.Var(&ingressAnnotations, "ingress-annotations", "JSON object with default Ingress annotations.")
 
 	opts := zap.Options{
@@ -113,6 +115,7 @@ func main() {
 		Scheme:                    mgr.GetScheme(),
 		ImageFinder:               imageFinder,
 		ImageUpdateEvents:         imageUpdateEvents,
+		DefaultIngressClassName:   ingressClass,
 		DefaultIngressAnnotations: ingressAnnotations,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Application")

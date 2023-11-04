@@ -295,4 +295,26 @@ var _ = Describe("Application controller", func() {
 			g.Expect(mainContainer.Image).To(Equal(newImageDigestRef.String()))
 		}).WithContext(ctx).Should(Succeed())
 	}, SpecTimeout(5*time.Second))
+
+	It("Should use default ingress class when no explicit ingress class is specified", func(ctx SpecContext) {
+		imageRef := registry.MustUpsertTag("app3", "latest")
+		app := makeApp("app3", imageRef)
+		app.Spec.Ingress.IngressClassName = nil
+
+		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+
+		By("Creating an Ingress")
+		ingressName := types.NamespacedName{
+			Name:      app.Name,
+			Namespace: app.Namespace,
+		}
+		var ingress networkingv1.Ingress
+		Eventually(func(g Gomega) {
+			err := k8sClient.Get(ctx, ingressName, &ingress)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			g.Expect(*ingress.Spec.IngressClassName).To(Equal("nginx-private"))
+		}).WithContext(ctx).Should(Succeed())
+
+	}, SpecTimeout(5*time.Second))
 })

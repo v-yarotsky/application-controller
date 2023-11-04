@@ -102,10 +102,11 @@ var _ = BeforeSuite(func() {
 
 	imageUpdateEvents = make(chan event.GenericEvent)
 	err = (&ApplicationReconciler{
-		Client:            k8sManager.GetClient(),
-		Scheme:            k8sManager.GetScheme(),
-		ImageFinder:       imageFinder,
-		ImageUpdateEvents: imageUpdateEvents,
+		Client:                  k8sManager.GetClient(),
+		Scheme:                  k8sManager.GetScheme(),
+		ImageFinder:             imageFinder,
+		ImageUpdateEvents:       imageUpdateEvents,
+		DefaultIngressClassName: "nginx-private",
 		DefaultIngressAnnotations: map[string]string{
 			"foo": "bar",
 		},
