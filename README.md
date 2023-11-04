@@ -3,7 +3,10 @@
 
 # TODO
 
-- [ ] Automatically update docker images of Applications.
+- [X] Automatically update docker images of Applications (digest).
+- [ ] Unhardcode reference to image pull secret (accept many via configuration)
+- [ ] Implement pagination when listing Applications on update check.
+- [ ] Automatically update docker images of Applications (semver).
 - [ ] Expose meaningful status on the `Application` CR.
 - [ ] Expose status transitions on the `Application` CR (e.g. when we're updating the image).
 - [ ] Garbage-collect `ClusterRoleBinding` objects (they cannot be auto-removed via ownership relationship).
