@@ -6,7 +6,7 @@ import (
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
 	"github.com/google/go-containerregistry/pkg/authn"
-	"github.com/google/go-containerregistry/pkg/authn/k8schain"
+	kubeauth "github.com/google/go-containerregistry/pkg/authn/kubernetes"
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
@@ -32,7 +32,13 @@ type Option func(*config) error
 
 func WithInClusterRegistryAuth() Option {
 	return func(opts *config) error {
-		kc, err := k8schain.NewInCluster(context.Background(), k8schain.Options{})
+		// If cloud auth is needed, use github.com/google/go-containerregistry/pkg/authn/k8schain instead
+		kc, err := kubeauth.NewInCluster(context.Background(), kubeauth.Options{
+			// TODO: unhardcode this
+			Namespace:          "application-controller-system",
+			ServiceAccountName: kubeauth.NoServiceAccount,
+			ImagePullSecrets:   []string{"regcred"},
+		})
 		if err != nil {
 			return fmt.Errorf("failed to obtain image registry authn keychain: %w", err)
 		}

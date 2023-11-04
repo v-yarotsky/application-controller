@@ -42,6 +42,8 @@ func (w *sillyImageWatcher) WatchForNewImages(ctx context.Context, c chan event.
 func (w *sillyImageWatcher) enqueueAllApplications(ctx context.Context, c chan event.GenericEvent) {
 	log := log.FromContext(ctx)
 
+	log.Info("Listing Applications to check for updates")
+
 	// TODO pagination
 	list := &yarotskymev1alpha1.ApplicationList{}
 	err := w.client.List(context.Background(), list)
@@ -50,6 +52,7 @@ func (w *sillyImageWatcher) enqueueAllApplications(ctx context.Context, c chan e
 		return
 	}
 	for _, app := range list.Items {
+		log.WithValues("namespace", app.Namespace, "name", app.Name).Info("Checking for updated Application image")
 		c <- event.GenericEvent{Object: &app}
 	}
 }
