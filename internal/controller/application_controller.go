@@ -100,7 +100,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	log.Info("Application should be provisioned")
+	log.Info("Application is up to date.")
 	return ctrl.Result{}, nil
 }
 
