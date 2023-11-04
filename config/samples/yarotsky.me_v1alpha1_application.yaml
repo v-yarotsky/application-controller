@@ -1,4 +1,4 @@
-apiVersion: yarotsky.me.yarotsky.me/v1alpha1
+apiVersion: yarotsky.me/v1alpha1
 kind: Application
 metadata:
   labels:

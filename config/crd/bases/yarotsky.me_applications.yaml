@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.13.0
-  name: applications.yarotsky.me.yarotsky.me
+  name: applications.yarotsky.me
 spec:
-  group: yarotsky.me.yarotsky.me
+  group: yarotsky.me
   names:
     kind: Application
     listKind: ApplicationList

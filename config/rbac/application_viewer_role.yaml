@@ -12,7 +12,7 @@ metadata:
   name: application-viewer-role
 rules:
 - apiGroups:
-  - yarotsky.me.yarotsky.me
+  - yarotsky.me
   resources:
   - applications
   verbs:
@@ -20,7 +20,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - yarotsky.me.yarotsky.me
+  - yarotsky.me
   resources:
   - applications/status
   verbs:

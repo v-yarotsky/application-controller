@@ -101,7 +101,7 @@ rules:
   verbs:
   - bind
 - apiGroups:
-  - yarotsky.me.yarotsky.me
+  - yarotsky.me
   resources:
   - applications
   verbs:
@@ -113,13 +113,13 @@ rules:
   - update
   - watch
 - apiGroups:
-  - yarotsky.me.yarotsky.me
+  - yarotsky.me
   resources:
   - applications/finalizers
   verbs:
   - update
 - apiGroups:
-  - yarotsky.me.yarotsky.me
+  - yarotsky.me
   resources:
   - applications/status
   verbs:
