@@ -42,8 +42,9 @@ import (
 
 // ApplicationReconciler reconciles a Application object
 type ApplicationReconciler struct {
-	ImageFinder       images.ImageFinder
-	ImageUpdateEvents chan event.GenericEvent
+	ImageFinder               images.ImageFinder
+	ImageUpdateEvents         chan event.GenericEvent
+	DefaultIngressAnnotations map[string]string
 	client.Client
 	Scheme *runtime.Scheme
 }
@@ -373,8 +374,9 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 	var wantIngress networkingv1.Ingress
 	wantIngress = networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      ingressName.Name,
-			Namespace: ingressName.Namespace,
+			Name:        ingressName.Name,
+			Namespace:   ingressName.Namespace,
+			Annotations: r.DefaultIngressAnnotations,
 		},
 		Spec: networkingv1.IngressSpec{
 			IngressClassName: app.Spec.Ingress.IngressClassName,

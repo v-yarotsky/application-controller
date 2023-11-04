@@ -230,6 +230,10 @@ var _ = Describe("Application controller", func() {
 			g.Expect(err).NotTo(HaveOccurred())
 
 			g.Expect(*ingress.Spec.IngressClassName).To(Equal("traefik"))
+			g.Expect(ingress.Annotations).To(Equal(map[string]string{
+				"foo": "bar",
+			}))
+
 			pathType := networkingv1.PathTypeImplementationSpecific
 			g.Expect(ingress.Spec.Rules).To(ContainElement(networkingv1.IngressRule{
 				Host: "dashboard.home.yarotsky.me",

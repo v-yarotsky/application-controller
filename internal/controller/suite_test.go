@@ -106,6 +106,9 @@ var _ = BeforeSuite(func() {
 		Scheme:            k8sManager.GetScheme(),
 		ImageFinder:       imageFinder,
 		ImageUpdateEvents: imageUpdateEvents,
+		DefaultIngressAnnotations: map[string]string{
+			"foo": "bar",
+		},
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 

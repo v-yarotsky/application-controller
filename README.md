@@ -5,13 +5,13 @@
 
 - [X] Automatically update docker images of Applications (digest).
 - [X] Unhardcode reference to image pull secret (accept many via configuration)
-- [ ] Implement pagination when listing Applications on update check.
-- [ ] Automatically update docker images of Applications (semver).
+- [X] Allow configuration of default Ingress annotations via controller config.
 - [ ] Expose meaningful status on the `Application` CR.
 - [ ] Expose status transitions on the `Application` CR (e.g. when we're updating the image).
 - [ ] Garbage-collect `ClusterRoleBinding` objects (they cannot be auto-removed via ownership relationship).
+- [ ] Implement pagination when listing Applications on update check.
+- [ ] Automatically update docker images of Applications (semver).
 - [ ] E2E tests.
-- [ ] Allow configuration of default Ingress annotations via controller config.
 
 ## Description
 // TODO(user): An in-depth paragraph about your project and overview of use
