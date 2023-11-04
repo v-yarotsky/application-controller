@@ -30,12 +30,14 @@ import (
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
+	"git.home.yarotsky.me/vlad/application-controller/internal/images"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -43,11 +45,12 @@ import (
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
 var (
-	cfg       *rest.Config
-	k8sClient client.Client
-	testEnv   *envtest.Environment
-	ctx       context.Context
-	cancel    context.CancelFunc
+	cfg               *rest.Config
+	k8sClient         client.Client
+	testEnv           *envtest.Environment
+	ctx               context.Context
+	cancel            context.CancelFunc
+	imageUpdateEvents chan event.GenericEvent
 )
 
 func TestControllers(t *testing.T) {
@@ -94,9 +97,15 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).ToNot(HaveOccurred())
 
+	imageFinder, err := images.NewImageFinder(ctx)
+	Expect(err).ToNot(HaveOccurred())
+
+	imageUpdateEvents = make(chan event.GenericEvent)
 	err = (&ApplicationReconciler{
-		Client: k8sManager.GetClient(),
-		Scheme: k8sManager.GetScheme(),
+		Client:            k8sManager.GetClient(),
+		Scheme:            k8sManager.GetScheme(),
+		ImageFinder:       imageFinder,
+		imageUpdateEvents: imageUpdateEvents,
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 

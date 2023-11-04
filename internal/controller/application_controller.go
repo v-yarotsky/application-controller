@@ -26,9 +26,13 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
+	"git.home.yarotsky.me/vlad/application-controller/internal/images"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -38,6 +42,8 @@ import (
 
 // ApplicationReconciler reconciles a Application object
 type ApplicationReconciler struct {
+	ImageFinder       images.ImageFinder
+	imageUpdateEvents chan event.GenericEvent
 	client.Client
 	Scheme *runtime.Scheme
 }
@@ -104,6 +110,12 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 	var wantDeploy appsv1.Deployment
 	selectorLabels := app.SelectorLabels()
 
+	imgRef, err := r.ImageFinder.FindImage(ctx, app.Spec.Image)
+	if err != nil {
+		log.Error(err, "failed to set controller reference on Deployment")
+		return err
+	}
+
 	deployName := app.DeploymentName()
 	wantDeploy = appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -123,7 +135,7 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 					Containers: []corev1.Container{
 						{
 							Name:            app.Name,
-							Image:           fmt.Sprintf("%s:v0.1.0", app.Spec.Image.Repository),
+							Image:           imgRef,
 							ImagePullPolicy: "Always",
 							Command:         app.Spec.Command,
 							Args:            app.Spec.Args,
@@ -157,7 +169,17 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 	}
 
 	// deployment was found
-	// check for diff and do r.Update(ctx, gotDeploy)
+
+	// See if the image needs updating
+	if currentImgRef := gotDeploy.Spec.Template.Spec.Containers[0].Image; currentImgRef != imgRef {
+		log.WithValues("currentImageRef", currentImgRef, "newImageRef", imgRef).Info("Found updated image. Updating Deployment")
+		updatedDeploy := gotDeploy.DeepCopy()
+		updatedDeploy.Spec.Template.Spec.Containers[0].Image = imgRef
+		if err := r.Patch(ctx, updatedDeploy, client.StrategicMergeFrom(&gotDeploy)); err != nil {
+			log.Error(err, "Failed to patch Deployment for Application")
+			return err
+		}
+	}
 	return nil
 }
 
@@ -409,5 +431,9 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.ServiceAccount{}). // Trigger reconciliation whenever an owned AccountService is changed.
 		Owns(&networkingv1.Ingress{}).  // Trigger reconciliation whenever an owned Ingress is changed.
 		Owns(&rbacv1.RoleBinding{}).    // Trigger reconciliation whenever an owned RoleBinding is changed.
+		WatchesRawSource(
+			&source.Channel{Source: r.imageUpdateEvents},
+			&handler.EnqueueRequestForObject{},
+		).
 		Complete(r)
 }
