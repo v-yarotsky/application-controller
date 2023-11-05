@@ -51,6 +51,8 @@ type ApplicationReconciler struct {
 	Scheme *runtime.Scheme
 }
 
+const FinalizerName = "application.yarotsky.me/finalizer"
+
 //+kubebuilder:rbac:groups=yarotsky.me,resources=applications,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=yarotsky.me,resources=applications/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=yarotsky.me,resources=applications/finalizers,verbs=update
@@ -74,8 +76,42 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	var app yarotskymev1alpha1.Application
 	if err := r.Get(ctx, req.NamespacedName, &app); err != nil {
+		if errors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
 		log.Error(err, "unable to fetch Application")
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		return ctrl.Result{}, err
+	}
+
+	if app.DeletionTimestamp.IsZero() {
+		if !controllerutil.ContainsFinalizer(&app, FinalizerName) {
+			controllerutil.AddFinalizer(&app, FinalizerName)
+			if err := r.Update(ctx, &app); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+
+	} else {
+		if controllerutil.ContainsFinalizer(&app, FinalizerName) {
+			// Clean up ClusterRoleBinding objects, if any; these are
+			// not deleted via owner references, since cluster-scoped
+			// resources cannot be owned by namespaced resources.
+			done, err := r.ensureNoClusterRoleBindings(ctx, &app)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+
+			if !done {
+				return ctrl.Result{}, nil
+			}
+
+			controllerutil.RemoveFinalizer(&app, FinalizerName)
+			if err := r.Update(ctx, &app); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		// we are in the process of deletion
+		return ctrl.Result{}, nil
 	}
 
 	if err := r.ensureServiceAccount(ctx, &app); err != nil {
@@ -288,14 +324,22 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 				RoleRef: roleRef.RoleRef,
 			}
 
-			// TODO ensure we clean up ClusterRoleBindings; can't use owner trackign due
-			// to `cluster-scoped resource must not have a namespace-scoped owner, owner's namespace default`
-
 			got := rbacv1.ClusterRoleBinding{}
 			if err := r.Get(ctx, client.ObjectKeyFromObject(&want), &got); err != nil {
 				if errors.IsNotFound(err) {
+					log := log.WithValues("clusterrolebinding", want.Name)
+
 					log.Info("ClusterRoleBinding not found for Application. Creating.")
-					return r.Create(ctx, &want)
+					if err := r.Create(ctx, &want); err != nil {
+						log.Error(err, "failed to create ClusterRoleBinding")
+						return fmt.Errorf("failed to create ClusterRoleBinding: %w", err)
+					}
+
+					app.Status.ClusterRoleBindings = append(app.Status.ClusterRoleBindings, yarotskymev1alpha1.ClusterRoleBindingRef{
+						Name: want.Name,
+						UID:  want.UID,
+					})
+					return r.Client.Status().Update(ctx, app)
 				}
 				log.Error(err, "Failed to retrieve ClusterRoleBinding for Application")
 				return err
@@ -432,6 +476,31 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 	}
 
 	return nil
+}
+
+func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application) (done bool, err error) {
+	log := log.FromContext(ctx)
+
+	if len(app.Status.ClusterRoleBindings) == 0 {
+		log.Info("No ClusterRoleBinding objects left")
+		return true, nil
+	}
+
+	ref := app.Status.ClusterRoleBindings[0]
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: ref.Name,
+			UID:  ref.UID,
+		},
+	}
+	log = log.WithValues("clusterrolebindingname", ref.Name, "clusterrolebindinguid", ref.UID)
+	log.Info("Deleting ClusterRoleBinding")
+	if err := r.Delete(ctx, crb); err != nil {
+		log.Error(err, "failed to delete ClusterRoleBinding")
+		return false, err
+	}
+	app.Status.ClusterRoleBindings = app.Status.ClusterRoleBindings[1:]
+	return false, r.Client.Status().Update(ctx, app)
 }
 
 // SetupWithManager sets up the controller with the Manager.

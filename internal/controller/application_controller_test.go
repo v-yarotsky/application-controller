@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -314,6 +315,43 @@ var _ = Describe("Application controller", func() {
 			g.Expect(err).NotTo(HaveOccurred())
 
 			g.Expect(*ingress.Spec.IngressClassName).To(Equal("nginx-private"))
+		}).WithContext(ctx).Should(Succeed())
+
+	}, SpecTimeout(5*time.Second))
+
+	It("Should properly delete created ClusterRoleBinding objects", func(ctx SpecContext) {
+		imageRef := registry.MustUpsertTag("app4", "latest")
+		app := makeApp("app4", imageRef)
+		app.Spec.Roles = []yarotskymev1alpha1.ScopedRoleRef{
+			{
+				RoleRef: rbacv1.RoleRef{
+					APIGroup: "rbac.authorization.k8s.io",
+					Kind:     "ClusterRole",
+					Name:     "my-cluster-role",
+				},
+				Scope: yarotskymev1alpha1.RoleBindingScopePointer(yarotskymev1alpha1.RoleBindingScopeCluster),
+			},
+		}
+
+		clusterRoleBindingNameForClusterRole := types.NamespacedName{
+			Name: "app4-clusterrole-my-cluster-role",
+		}
+		var clusterRoleBindingForClusterRole rbacv1.ClusterRoleBinding
+
+		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+
+		Eventually(func(g Gomega) {
+			err := k8sClient.Get(ctx, clusterRoleBindingNameForClusterRole, &clusterRoleBindingForClusterRole)
+			g.Expect(err).NotTo(HaveOccurred())
+		}).WithContext(ctx).Should(Succeed())
+
+		By("Deleting the CluseterRoleBinding objects")
+		Expect(k8sClient.Delete(ctx, &app)).Should(Succeed())
+
+		Eventually(func(g Gomega) {
+			err := k8sClient.Get(ctx, clusterRoleBindingNameForClusterRole, &clusterRoleBindingForClusterRole)
+			g.Expect(errors.IsNotFound(err)).To(BeTrue())
+
 		}).WithContext(ctx).Should(Succeed())
 
 	}, SpecTimeout(5*time.Second))

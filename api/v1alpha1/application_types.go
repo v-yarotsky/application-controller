@@ -215,10 +215,14 @@ type Metrics struct {
 	PortName string `json:"portName,omitempty"`
 }
 
+type ClusterRoleBindingRef struct {
+	Name string    `json:"name"`
+	UID  types.UID `json:"uid"`
+}
+
 // ApplicationStatus defines the observed state of Application
 type ApplicationStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	ClusterRoleBindings []ClusterRoleBindingRef `json:"clusterRoleBindings,omitempty"`
 }
 
 //+kubebuilder:object:root=true
