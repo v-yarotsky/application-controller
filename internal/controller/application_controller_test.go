@@ -99,29 +99,26 @@ var _ = Describe("Application controller", func() {
 			Name:      app.Name,
 			Namespace: app.Namespace,
 		}
-		var serviceAccount corev1.ServiceAccount
 		Eventually(func(g Gomega) {
+			var serviceAccount corev1.ServiceAccount
 			err := k8sClient.Get(ctx, serviceAccountName, &serviceAccount)
 			g.Expect(err).NotTo(HaveOccurred())
 		}).WithContext(ctx).Should(Succeed())
 
 		By("Creating cluster role bindings for ClusterRoles")
-		clusterRoleBindingNameForClusterRole := types.NamespacedName{
-			Name: "app1-clusterrole-my-cluster-role",
-		}
-		var clusterRoleBindingForClusterRole rbacv1.ClusterRoleBinding
 		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, clusterRoleBindingNameForClusterRole, &clusterRoleBindingForClusterRole)
+			var crb rbacv1.ClusterRoleBinding
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: "app1-clusterrole-my-cluster-role"}, &crb)
 			g.Expect(err).NotTo(HaveOccurred())
 
-			g.Expect(clusterRoleBindingForClusterRole.Subjects).To(ContainElement(rbacv1.Subject{
+			g.Expect(crb.Subjects).To(ContainElement(rbacv1.Subject{
 				APIGroup:  "",
 				Kind:      "ServiceAccount",
 				Name:      serviceAccountName.Name,
 				Namespace: serviceAccountName.Namespace,
 			}))
 
-			g.Expect(clusterRoleBindingForClusterRole.RoleRef).To(Equal(rbacv1.RoleRef{
+			g.Expect(crb.RoleRef).To(Equal(rbacv1.RoleRef{
 				APIGroup: "rbac.authorization.k8s.io",
 				Kind:     "ClusterRole",
 				Name:     "my-cluster-role",
@@ -129,23 +126,19 @@ var _ = Describe("Application controller", func() {
 		}).WithContext(ctx).Should(Succeed())
 
 		By("Creating role bindings for ClusterRoles")
-		roleBindingNameForClusterRole := types.NamespacedName{
-			Name:      "app1-clusterrole-my-cluster-role-for-namespace",
-			Namespace: app.Namespace,
-		}
-		var roleBindingForClusterRole rbacv1.RoleBinding
 		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, roleBindingNameForClusterRole, &roleBindingForClusterRole)
+			var rb rbacv1.RoleBinding
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: "app1-clusterrole-my-cluster-role-for-namespace", Namespace: app.Namespace}, &rb)
 			g.Expect(err).NotTo(HaveOccurred())
 
-			g.Expect(roleBindingForClusterRole.Subjects).To(ContainElement(rbacv1.Subject{
+			g.Expect(rb.Subjects).To(ContainElement(rbacv1.Subject{
 				APIGroup:  "",
 				Kind:      "ServiceAccount",
 				Name:      serviceAccountName.Name,
 				Namespace: serviceAccountName.Namespace,
 			}))
 
-			g.Expect(roleBindingForClusterRole.RoleRef).To(Equal(rbacv1.RoleRef{
+			g.Expect(rb.RoleRef).To(Equal(rbacv1.RoleRef{
 				APIGroup: "rbac.authorization.k8s.io",
 				Kind:     "ClusterRole",
 				Name:     "my-cluster-role-for-namespace",
@@ -153,23 +146,19 @@ var _ = Describe("Application controller", func() {
 		}).WithContext(ctx).Should(Succeed())
 
 		By("Creating role bindings for Roles")
-		roleBindingNameForRole := types.NamespacedName{
-			Name:      "app1-role-my-role",
-			Namespace: app.Namespace,
-		}
-		var roleBindingForRole rbacv1.RoleBinding
 		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, roleBindingNameForRole, &roleBindingForRole)
+			var rb rbacv1.RoleBinding
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: "app1-role-my-role", Namespace: app.Namespace}, &rb)
 			g.Expect(err).NotTo(HaveOccurred())
 
-			g.Expect(roleBindingForRole.Subjects).To(ContainElement(rbacv1.Subject{
+			g.Expect(rb.Subjects).To(ContainElement(rbacv1.Subject{
 				APIGroup:  "",
 				Kind:      "ServiceAccount",
 				Name:      serviceAccountName.Name,
 				Namespace: serviceAccountName.Namespace,
 			}))
 
-			g.Expect(roleBindingForRole.RoleRef).To(Equal(rbacv1.RoleRef{
+			g.Expect(rb.RoleRef).To(Equal(rbacv1.RoleRef{
 				APIGroup: "rbac.authorization.k8s.io",
 				Kind:     "Role",
 				Name:     "my-role",
@@ -177,13 +166,9 @@ var _ = Describe("Application controller", func() {
 		}).WithContext(ctx).Should(Succeed())
 
 		By("Creating a deployment")
-		deployName := types.NamespacedName{
-			Name:      app.Name,
-			Namespace: app.Namespace,
-		}
-		var deploy appsv1.Deployment
 		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, deployName, &deploy)
+			var deploy appsv1.Deployment
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: app.Name, Namespace: app.Namespace}, &deploy)
 			g.Expect(err).NotTo(HaveOccurred())
 
 			g.Expect(deploy.Spec.Template.Spec.ServiceAccountName).To(Equal(serviceAccountName.Name))
@@ -196,12 +181,9 @@ var _ = Describe("Application controller", func() {
 		}).WithContext(ctx).Should(Succeed())
 
 		By("Creating a service")
-		serviceName := types.NamespacedName{
-			Name:      app.Name,
-			Namespace: app.Namespace,
-		}
-		var service corev1.Service
+		serviceName := types.NamespacedName{Name: app.Name, Namespace: app.Namespace}
 		Eventually(func(g Gomega) {
+			var service corev1.Service
 			err := k8sClient.Get(ctx, serviceName, &service)
 			g.Expect(err).NotTo(HaveOccurred())
 
@@ -221,13 +203,9 @@ var _ = Describe("Application controller", func() {
 		}).WithContext(ctx).Should(Succeed())
 
 		By("Creating an Ingress")
-		ingressName := types.NamespacedName{
-			Name:      app.Name,
-			Namespace: app.Namespace,
-		}
-		var ingress networkingv1.Ingress
 		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, ingressName, &ingress)
+			var ingress networkingv1.Ingress
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: app.Name, Namespace: app.Namespace}, &ingress)
 			g.Expect(err).NotTo(HaveOccurred())
 
 			g.Expect(*ingress.Spec.IngressClassName).To(Equal("traefik"))
@@ -305,13 +283,9 @@ var _ = Describe("Application controller", func() {
 		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
 
 		By("Creating an Ingress")
-		ingressName := types.NamespacedName{
-			Name:      app.Name,
-			Namespace: app.Namespace,
-		}
-		var ingress networkingv1.Ingress
 		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, ingressName, &ingress)
+			var ingress networkingv1.Ingress
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: app.Name, Namespace: app.Namespace}, &ingress)
 			g.Expect(err).NotTo(HaveOccurred())
 
 			g.Expect(*ingress.Spec.IngressClassName).To(Equal("nginx-private"))
@@ -322,26 +296,16 @@ var _ = Describe("Application controller", func() {
 	It("Should properly delete created ClusterRoleBinding objects", func(ctx SpecContext) {
 		imageRef := registry.MustUpsertTag("app4", "latest")
 		app := makeApp("app4", imageRef)
-		app.Spec.Roles = []yarotskymev1alpha1.ScopedRoleRef{
-			{
-				RoleRef: rbacv1.RoleRef{
-					APIGroup: "rbac.authorization.k8s.io",
-					Kind:     "ClusterRole",
-					Name:     "my-cluster-role",
-				},
-				Scope: yarotskymev1alpha1.RoleBindingScopePointer(yarotskymev1alpha1.RoleBindingScopeCluster),
-			},
-		}
 
-		clusterRoleBindingNameForClusterRole := types.NamespacedName{
+		crbName := types.NamespacedName{
 			Name: "app4-clusterrole-my-cluster-role",
 		}
-		var clusterRoleBindingForClusterRole rbacv1.ClusterRoleBinding
+		var crb rbacv1.ClusterRoleBinding
 
 		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
 
 		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, clusterRoleBindingNameForClusterRole, &clusterRoleBindingForClusterRole)
+			err := k8sClient.Get(ctx, crbName, &crb)
 			g.Expect(err).NotTo(HaveOccurred())
 		}).WithContext(ctx).Should(Succeed())
 
@@ -349,7 +313,7 @@ var _ = Describe("Application controller", func() {
 		Expect(k8sClient.Delete(ctx, &app)).Should(Succeed())
 
 		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, clusterRoleBindingNameForClusterRole, &clusterRoleBindingForClusterRole)
+			err := k8sClient.Get(ctx, crbName, &crb)
 			g.Expect(errors.IsNotFound(err)).To(BeTrue())
 
 		}).WithContext(ctx).Should(Succeed())
