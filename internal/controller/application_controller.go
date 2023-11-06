@@ -144,10 +144,15 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 }
 
 func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarotskymev1alpha1.Application) error {
-	log := log.FromContext(ctx)
+	name := app.DeploymentName()
+	log := log.FromContext(ctx).WithValues("deploymentname", name.String())
 
-	var wantDeploy appsv1.Deployment
-	selectorLabels := app.SelectorLabels()
+	deploy := appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name.Name,
+			Namespace: name.Namespace,
+		},
+	}
 
 	imgRef, err := r.ImageFinder.FindImage(ctx, app.Spec.Image)
 	if err != nil {
@@ -155,101 +160,92 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 		return err
 	}
 
-	deployName := app.DeploymentName()
-	wantDeploy = appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      deployName.Name,
-			Namespace: deployName.Namespace,
-		},
-		Spec: appsv1.DeploymentSpec{
-			Selector: &metav1.LabelSelector{
-				MatchLabels: selectorLabels,
-			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: selectorLabels,
-				},
-				Spec: corev1.PodSpec{
-					ServiceAccountName: app.ServiceAccountName().Name,
-					Containers: []corev1.Container{
-						{
-							Name:            app.Name,
-							Image:           imgRef,
-							ImagePullPolicy: "Always",
-							Command:         app.Spec.Command,
-							Args:            app.Spec.Args,
-							Env:             app.Spec.Env,
-							Ports:           app.Spec.Ports,
-							Resources:       app.Spec.Resources,
-							LivenessProbe:   app.Spec.LivenessProbe,
-							ReadinessProbe:  app.Spec.ReadinessProbe,
-							StartupProbe:    app.Spec.StartupProbe,
-							SecurityContext: app.Spec.SecurityContext,
-						},
-					},
-				},
-			},
-		},
-	}
-	if err := controllerutil.SetControllerReference(app, &wantDeploy, r.Scheme); err != nil {
-		log.Error(err, "failed to set controller reference on Deployment")
-		return err
-	}
+	result, err := controllerutil.CreateOrPatch(ctx, r.Client, &deploy, func() error {
+		selectorLabels := app.SelectorLabels()
 
-	gotDeploy := appsv1.Deployment{}
-
-	if err := r.Get(ctx, client.ObjectKeyFromObject(&wantDeploy), &gotDeploy); err != nil {
-		if errors.IsNotFound(err) {
-			log.Info("Deployment not found for Application. Creating.")
-			return r.Create(ctx, &wantDeploy)
+		deploy.Spec.Selector = &metav1.LabelSelector{
+			MatchLabels: selectorLabels,
 		}
-		log.Error(err, "Failed to retrieve Deployment for Application")
-		return err
-	}
 
-	// deployment was found
+		deploy.Spec.Template.ObjectMeta = metav1.ObjectMeta{
+			Labels: selectorLabels,
+		}
 
-	// See if the image needs updating
-	if currentImgRef := gotDeploy.Spec.Template.Spec.Containers[0].Image; currentImgRef != imgRef {
-		log.WithValues("currentImageRef", currentImgRef, "newImageRef", imgRef).Info("Found updated image. Updating Deployment")
-		updatedDeploy := gotDeploy.DeepCopy()
-		updatedDeploy.Spec.Template.Spec.Containers[0].Image = imgRef
-		if err := r.Patch(ctx, updatedDeploy, client.StrategicMergeFrom(&gotDeploy)); err != nil {
-			log.Error(err, "Failed to patch Deployment for Application")
+		podTemplateSpec := &deploy.Spec.Template.Spec
+		podTemplateSpec.ServiceAccountName = app.ServiceAccountName().Name
+
+		var container *corev1.Container
+		if len(podTemplateSpec.Containers) == 0 {
+			podTemplateSpec.Containers = []corev1.Container{{}}
+		}
+		container = &podTemplateSpec.Containers[0]
+
+		container.Name = app.Name
+		if container.Image != "" && container.Image != imgRef {
+			log.Info("Updating container image", "oldimage", container.Image, "newimage", imgRef)
+		}
+		container.Image = imgRef
+		container.ImagePullPolicy = "Always"
+		container.Command = app.Spec.Command
+		container.Args = app.Spec.Args
+		container.Env = app.Spec.Env
+		container.Ports = app.Spec.Ports
+		container.Resources = app.Spec.Resources
+		container.LivenessProbe = app.Spec.LivenessProbe
+		container.ReadinessProbe = app.Spec.ReadinessProbe
+		container.StartupProbe = app.Spec.StartupProbe
+		container.SecurityContext = app.Spec.SecurityContext
+
+		if err := controllerutil.SetControllerReference(app, &deploy, r.Scheme); err != nil {
+			log.Error(err, "failed to set controller reference on Deployment")
 			return err
 		}
+		return nil
+	})
+	if err != nil {
+		log.Error(err, "failed to create/update the Deployment")
+		return err
+	}
+
+	switch result {
+	case controllerutil.OperationResultCreated:
+		log.Info("Created Deployment")
+	case controllerutil.OperationResultUpdated:
+		log.Info("Updated Deployment")
 	}
 	return nil
 }
 
 func (r *ApplicationReconciler) ensureServiceAccount(ctx context.Context, app *yarotskymev1alpha1.Application) error {
-	log := log.FromContext(ctx)
+	name := app.ServiceAccountName()
+	log := log.FromContext(ctx).WithValues("serviceaccountname", name.String())
 
-	serviceAccountName := app.ServiceAccountName()
-
-	var wantServiceAccount corev1.ServiceAccount
-	wantServiceAccount = corev1.ServiceAccount{
+	var sa corev1.ServiceAccount
+	sa = corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      serviceAccountName.Name,
-			Namespace: serviceAccountName.Namespace,
+			Name:      name.Name,
+			Namespace: name.Namespace,
 		},
 	}
-	if err := controllerutil.SetControllerReference(app, &wantServiceAccount, r.Scheme); err != nil {
-		log.Error(err, "failed to set controller reference on ServiceAccount")
-		return err
-	}
 
-	gotServiceAccount := corev1.ServiceAccount{}
-
-	if err := r.Get(ctx, client.ObjectKeyFromObject(&wantServiceAccount), &gotServiceAccount); err != nil {
-		if errors.IsNotFound(err) {
-			log.Info("ServiceAccount not found for Application. Creating.")
-			return r.Create(ctx, &wantServiceAccount)
+	result, err := controllerutil.CreateOrPatch(ctx, r.Client, &sa, func() error {
+		if err := controllerutil.SetControllerReference(app, &sa, r.Scheme); err != nil {
+			log.Error(err, "failed to set controller reference on ServiceAccount")
+			return err
 		}
-		log.Error(err, "Failed to retrieve ServiceAccount for Application")
+		return nil
+	})
+	if err != nil {
+		log.Error(err, "failed to create/update the ServiceACcount")
 		return err
 	}
 
+	switch result {
+	case controllerutil.OperationResultCreated:
+		log.Info("Created ServiceAccount")
+	case controllerutil.OperationResultUpdated:
+		log.Info("Updated ServiceAccount")
+	}
 	return nil
 }
 
@@ -351,58 +347,58 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 }
 
 func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotskymev1alpha1.Application) error {
-	log := log.FromContext(ctx)
+	name := app.ServiceName()
+	log := log.FromContext(ctx).WithValues("servicename", name.String())
 
-	serviceName := app.ServiceName()
-
-	var wantService corev1.Service
-	ports := make([]corev1.ServicePort, 0, len(app.Spec.Ports))
-	for _, p := range app.Spec.Ports {
-		ports = append(ports, corev1.ServicePort{
-			Name:       p.Name,
-			TargetPort: intstr.FromString(p.Name),
-			Protocol:   p.Protocol,
-			Port:       p.ContainerPort,
-		})
-	}
-	wantService = corev1.Service{
+	svc := corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      serviceName.Name,
-			Namespace: serviceName.Namespace,
-		},
-		Spec: corev1.ServiceSpec{
-			Selector: app.SelectorLabels(),
-			Ports:    ports,
+			Name:      name.Name,
+			Namespace: name.Namespace,
 		},
 	}
-	if err := controllerutil.SetControllerReference(app, &wantService, r.Scheme); err != nil {
-		log.Error(err, "failed to set controller reference on Service")
-		return err
-	}
 
-	gotService := corev1.Service{}
-
-	if err := r.Get(ctx, client.ObjectKeyFromObject(&wantService), &gotService); err != nil {
-		if errors.IsNotFound(err) {
-			log.Info("Service not found for Application. Creating.")
-			return r.Create(ctx, &wantService)
+	result, err := controllerutil.CreateOrPatch(ctx, r.Client, &svc, func() error {
+		ports := make([]corev1.ServicePort, 0, len(app.Spec.Ports))
+		for _, p := range app.Spec.Ports {
+			ports = append(ports, corev1.ServicePort{
+				Name:       p.Name,
+				TargetPort: intstr.FromString(p.Name),
+				Protocol:   p.Protocol,
+				Port:       p.ContainerPort,
+			})
 		}
-		log.Error(err, "Failed to retrieve Service for Application")
+		svc.Spec.Ports = ports
+		svc.Spec.Selector = app.SelectorLabels()
+		if err := controllerutil.SetControllerReference(app, &svc, r.Scheme); err != nil {
+			log.Error(err, "failed to set controller reference on Service")
+			return err
+		}
+		return nil
+	})
+
+	if err != nil {
+		log.Error(err, "failed to create/update the Service")
 		return err
 	}
 
+	switch result {
+	case controllerutil.OperationResultCreated:
+		log.Info("Service Deployment")
+	case controllerutil.OperationResultUpdated:
+		log.Info("Service Deployment")
+	}
 	return nil
 }
 
 func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotskymev1alpha1.Application) error {
-	log := log.FromContext(ctx)
+	name := app.IngressName()
+	log := log.FromContext(ctx).WithValues("ingressname", name.String())
 
 	if app.Spec.Ingress == nil {
 		log.Info("Application does not specify Ingress, skipping Ingress creation.")
 		return nil
 	}
 
-	ingressName := app.IngressName()
 	portName := app.Spec.Ingress.PortName
 	if portName == "" {
 		for _, p := range app.Spec.Ports {
@@ -425,30 +421,31 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 		ingressClassName = pointer.String(r.DefaultIngressClassName)
 	}
 
-	var wantIngress networkingv1.Ingress
-	wantIngress = networkingv1.Ingress{
+	ing := networkingv1.Ingress{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        ingressName.Name,
-			Namespace:   ingressName.Namespace,
-			Annotations: r.DefaultIngressAnnotations,
+			Name:      name.Name,
+			Namespace: name.Namespace,
 		},
-		Spec: networkingv1.IngressSpec{
-			IngressClassName: ingressClassName,
-			Rules: []networkingv1.IngressRule{
-				{
-					Host: app.Spec.Ingress.Host,
-					IngressRuleValue: networkingv1.IngressRuleValue{
-						HTTP: &networkingv1.HTTPIngressRuleValue{
-							Paths: []networkingv1.HTTPIngressPath{
-								{
-									Path:     "/",
-									PathType: &pathType,
-									Backend: networkingv1.IngressBackend{
-										Service: &networkingv1.IngressServiceBackend{
-											Name: app.ServiceName().Name,
-											Port: networkingv1.ServiceBackendPort{
-												Name: portName,
-											},
+	}
+
+	result, err := controllerutil.CreateOrPatch(ctx, r.Client, &ing, func() error {
+		ing.ObjectMeta.Annotations = r.DefaultIngressAnnotations
+
+		ing.Spec.IngressClassName = ingressClassName
+		ing.Spec.Rules = []networkingv1.IngressRule{
+			{
+				Host: app.Spec.Ingress.Host,
+				IngressRuleValue: networkingv1.IngressRuleValue{
+					HTTP: &networkingv1.HTTPIngressRuleValue{
+						Paths: []networkingv1.HTTPIngressPath{
+							{
+								Path:     "/",
+								PathType: &pathType,
+								Backend: networkingv1.IngressBackend{
+									Service: &networkingv1.IngressServiceBackend{
+										Name: app.ServiceName().Name,
+										Port: networkingv1.ServiceBackendPort{
+											Name: portName,
 										},
 									},
 								},
@@ -457,24 +454,25 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 					},
 				},
 			},
-		},
-	}
-	if err := controllerutil.SetControllerReference(app, &wantIngress, r.Scheme); err != nil {
-		log.Error(err, "failed to set controller reference on Ingress")
-		return err
-	}
-
-	gotIngress := networkingv1.Ingress{}
-
-	if err := r.Get(ctx, client.ObjectKeyFromObject(&wantIngress), &gotIngress); err != nil {
-		if errors.IsNotFound(err) {
-			log.Info("Ingress not found for Application. Creating.")
-			return r.Create(ctx, &wantIngress)
 		}
-		log.Error(err, "Failed to retrieve Ingress for Application")
+		if err := controllerutil.SetControllerReference(app, &ing, r.Scheme); err != nil {
+			log.Error(err, "failed to set controller reference on Ingress")
+			return err
+		}
+		return nil
+	})
+
+	if err != nil {
+		log.Error(err, "failed to create/update the Ingress")
 		return err
 	}
 
+	switch result {
+	case controllerutil.OperationResultCreated:
+		log.Info("Created Ingress")
+	case controllerutil.OperationResultUpdated:
+		log.Info("Updated Ingress")
+	}
 	return nil
 }
 

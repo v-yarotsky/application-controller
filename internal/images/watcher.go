@@ -5,6 +5,7 @@ import (
 	"time"
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -45,8 +46,11 @@ func (w *sillyImageWatcher) enqueueAllApplications(ctx context.Context, c chan e
 	log.Info("Listing Applications to check for updates")
 
 	// TODO pagination
-	list := &yarotskymev1alpha1.ApplicationList{}
-	err := w.client.List(context.Background(), list)
+	list := &metav1.PartialObjectMetadataList{}
+	list.SetGroupVersionKind(yarotskymev1alpha1.SchemeBuilder.GroupVersion.WithKind("ApplicationList"))
+
+	lookInAllNamespaces := client.InNamespace("")
+	err := w.client.List(context.Background(), list, lookInAllNamespaces)
 	if err != nil {
 		log.Error(err, "failed to get the list of Applications to check for image updates")
 		return

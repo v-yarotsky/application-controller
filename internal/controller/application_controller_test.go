@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/pointer"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
@@ -85,7 +86,10 @@ var _ = Describe("Application controller", func() {
 
 	BeforeEach(func() {
 		registry = testutil.NewTestRegistry(GinkgoT())
-		DeferCleanup(registry.Close)
+	})
+
+	AfterEach(func() {
+		registry.Close()
 	})
 
 	It("Should create Application custom resources", func(ctx SpecContext) {
@@ -318,5 +322,47 @@ var _ = Describe("Application controller", func() {
 
 		}).WithContext(ctx).Should(Succeed())
 
+	}, SpecTimeout(5*time.Second))
+
+	It("Should update the deployment when container configuration changes", func(ctx SpecContext) {
+		imageRef := registry.MustUpsertTag("app5", "latest")
+		app := makeApp("app5", imageRef)
+		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+
+		deployName := types.NamespacedName{Name: app.Name, Namespace: app.Namespace}
+		var deploy appsv1.Deployment
+
+		By("Creating a deployment")
+		Eventually(func(g Gomega) {
+			err := k8sClient.Get(ctx, deployName, &deploy)
+			g.Expect(err).NotTo(HaveOccurred())
+		}).WithContext(ctx).Should(Succeed())
+
+		By("Updating the Application")
+		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: app.Name, Namespace: app.Namespace}, &app)
+			if err != nil {
+				return err
+			}
+			app.Spec.Env = []corev1.EnvVar{
+				{
+					Name:  "MY_ENV_VAR",
+					Value: "FOO",
+				},
+			}
+			return k8sClient.Update(ctx, &app)
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Eventually updating the deployment")
+		Eventually(func(g Gomega) {
+			err := k8sClient.Get(ctx, deployName, &deploy)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			g.Expect(deploy.Spec.Template.Spec.Containers).To(HaveLen(1))
+
+			mainContainer := deploy.Spec.Template.Spec.Containers[0]
+			g.Expect(mainContainer.Env).To(ContainElement(corev1.EnvVar{Name: "MY_ENV_VAR", Value: "FOO"}))
+		}).WithContext(ctx).Should(Succeed())
 	}, SpecTimeout(5*time.Second))
 })
