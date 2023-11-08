@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
+	"git.home.yarotsky.me/vlad/application-controller/internal/gkutil"
 	"git.home.yarotsky.me/vlad/application-controller/internal/images"
 	osdkHandler "github.com/operator-framework/operator-lib/handler"
 	appsv1 "k8s.io/api/apps/v1"
@@ -102,13 +103,17 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			// Clean up ClusterRoleBinding objects, if any; these are
 			// not deleted via owner references, since cluster-scoped
 			// resources cannot be owned by namespaced resources.
+			log.Info("Cleaning up ClusterRoleBindings")
 			err := r.ensureNoClusterRoleBindings(ctx, &app)
 			if err != nil {
+				log.Error(err, "failed to clean up ClusterRoleBindings")
 				return ctrl.Result{}, err
 			}
 
+			log.Info("Removing finalizer")
 			controllerutil.RemoveFinalizer(&app, FinalizerName)
 			if err := r.Update(ctx, &app); err != nil {
+				log.Error(err, "failed to remove finalizer")
 				return ctrl.Result{}, err
 			}
 		}
@@ -123,6 +128,11 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	if err := r.ensureRoleBindings(ctx, &app); err != nil {
 		log.Error(err, "failed to ensure a RoleBindings exists for the Application")
+		return ctrl.Result{}, err
+	}
+
+	if err := r.ensureClusterRoleBindings(ctx, &app); err != nil {
+		log.Error(err, "failed to ensure a ClusterRoleBindings exists for the Application")
 		return ctrl.Result{}, err
 	}
 
@@ -252,133 +262,79 @@ func (r *ApplicationReconciler) ensureServiceAccount(ctx context.Context, app *y
 }
 
 func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application) error {
-	log := log.FromContext(ctx)
+	baseLog := log.FromContext(ctx)
 
 	serviceAccountName := app.ServiceAccountName()
 
-	// TODO: This did not work with custom indexer! Make note!
-	// ownedRoleBindings := &metav1.PartialObjectMetadataList{}
-	// ownedRoleBindings.SetGroupVersionKind(rbacv1.SchemeGroupVersion.WithKind("RoleBinding"))
+	rbs := &rbacv1.RoleBindingList{}
 
-	ownedRoleBindings := &rbacv1.RoleBindingList{}
-
-	err := r.Client.List(ctx, ownedRoleBindings, client.InNamespace(app.Namespace), client.MatchingFields(map[string]string{roleBindingOwnerKey: app.Name}))
+	err := r.Client.List(ctx, rbs, client.InNamespace(app.Namespace), client.MatchingFields(map[string]string{roleBindingOwnerKey: app.Name}))
 	if err != nil {
-		log.Error(err, "failed to get the list of owned RoleBinding objects")
+		baseLog.Error(err, "failed to get the list of owned RoleBinding objects")
 		return err
 	}
 
-	seenRoleBindingsSet := make(map[string]bool, len(ownedRoleBindings.Items))
-	for _, rb := range ownedRoleBindings.Items {
-		seenRoleBindingsSet[rb.Name] = false
-	}
-
-	ownedClusterRoleBindings, err := r.getOwnedClusterRoleBindings(ctx, app)
-	if err != nil {
-		return err
-	}
-
-	seenClusterRoleBindingsSet := make(map[string]bool, len(ownedClusterRoleBindings))
-	for _, crb := range ownedClusterRoleBindings {
-		seenClusterRoleBindingsSet[crb.Name] = false
+	seenSet := make(map[string]bool, len(rbs.Items))
+	for _, rb := range rbs.Items {
+		seenSet[rb.Name] = false
 	}
 
 	for _, roleRef := range app.Spec.Roles {
-		log = log.WithValues("kind", roleRef.Kind, "name", roleRef.Name)
+		log := baseLog.WithValues("kind", roleRef.Kind, "name", roleRef.Name)
 
 		name, err := app.RoleBindingNameForRoleRef(roleRef.RoleRef)
 		if err != nil {
+			log.Error(err, "failed to generate name for a RoleBinding")
 			return err
 		}
 
-		scope := yarotskymev1alpha1.RoleBindingScopeNamespace
-		if roleRef.Scope != nil {
-			scope = *roleRef.Scope
-		}
+		log = log.WithValues("rbname", name.Name)
 
-		if scope == yarotskymev1alpha1.RoleBindingScopeNamespace {
-			rb := rbacv1.RoleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      name.Name,
-					Namespace: name.Namespace,
+		if roleRef.ScopeOrDefault() != yarotskymev1alpha1.RoleBindingScopeNamespace {
+			continue
+		}
+		rb := rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name.Name,
+				Namespace: name.Namespace,
+			},
+		}
+		result, err := controllerutil.CreateOrPatch(ctx, r.Client, &rb, func() error {
+			rb.Subjects = []rbacv1.Subject{
+				{
+					APIGroup:  "",
+					Kind:      "ServiceAccount",
+					Name:      serviceAccountName.Name,
+					Namespace: serviceAccountName.Namespace,
 				},
 			}
-			result, err := controllerutil.CreateOrPatch(ctx, r.Client, &rb, func() error {
-				rb.Subjects = []rbacv1.Subject{
-					{
-						APIGroup:  "",
-						Kind:      "ServiceAccount",
-						Name:      serviceAccountName.Name,
-						Namespace: serviceAccountName.Namespace,
-					},
-				}
-				rb.RoleRef = roleRef.RoleRef
-				if err := controllerutil.SetControllerReference(app, &rb, r.Scheme); err != nil {
-					log.Error(err, "failed to set controller reference on RoleBinding")
-					return err
-				}
-
-				return nil
-			})
-			if err != nil {
-				log.Error(err, "failed to create/update RoleBinding")
+			rb.RoleRef = roleRef.RoleRef
+			if err := controllerutil.SetControllerReference(app, &rb, r.Scheme); err != nil {
+				log.Error(err, "failed to set controller reference on RoleBinding")
 				return err
 			}
 
-			switch result {
-			case controllerutil.OperationResultCreated:
-				log.Info("RoleBinding created")
-			case controllerutil.OperationResultUpdated:
-				log.Info("RoleBinding updated")
-			}
-			seenRoleBindingsSet[name.Name] = true
-
-		} else if scope == yarotskymev1alpha1.RoleBindingScopeCluster {
-			if !(roleRef.APIGroup == "rbac.authorization.k8s.io" && roleRef.Kind == "ClusterRole") {
-				err := fmt.Errorf("ClusterRoleBindings can only be created for ClusterRoles")
-				log.Error(err, "Failed to create ClusterRoleBinding")
-				return err
-			}
-			rb := rbacv1.ClusterRoleBinding{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: name.Name,
-				},
-			}
-			result, err := controllerutil.CreateOrPatch(ctx, r.Client, &rb, func() error {
-				osdkHandler.SetOwnerAnnotations(app, &rb)
-
-				rb.Subjects = []rbacv1.Subject{
-					{
-						APIGroup:  "",
-						Kind:      "ServiceAccount",
-						Name:      serviceAccountName.Name,
-						Namespace: serviceAccountName.Namespace,
-					},
-				}
-				rb.RoleRef = roleRef.RoleRef
-
-				return nil
-			})
-			if err != nil {
-				log.Error(err, "failed to create/update a ClusterRoleBinding")
-				return err
-			}
-
-			switch result {
-			case controllerutil.OperationResultCreated:
-				log.Info("ClusterRoleBinding created")
-			case controllerutil.OperationResultUpdated:
-				log.Info("ClusterRoleBinding updated")
-			}
-			seenClusterRoleBindingsSet[name.Name] = true
+			return nil
+		})
+		if err != nil {
+			log.Error(err, "failed to create/update RoleBinding")
+			return err
 		}
+
+		switch result {
+		case controllerutil.OperationResultCreated:
+			log.Info("RoleBinding created")
+		case controllerutil.OperationResultUpdated:
+			log.Info("RoleBinding updated")
+		}
+		seenSet[name.Name] = true
 	}
 
-	for rbName, seen := range seenRoleBindingsSet {
+	for rbName, seen := range seenSet {
 		if seen {
 			continue
 		}
-		log = log.WithValues("name", rbName)
+		log := baseLog.WithValues("name", rbName)
 		log.Info("RoleBinding is not needed according to spec. Deleting.")
 		rb := rbacv1.RoleBinding{
 			ObjectMeta: metav1.ObjectMeta{
@@ -393,16 +349,83 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 		}
 	}
 
-	for crbName, seen := range seenClusterRoleBindingsSet {
+	return nil
+}
+
+func (r *ApplicationReconciler) ensureClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application) error {
+	baseLog := log.FromContext(ctx)
+
+	serviceAccountName := app.ServiceAccountName()
+
+	crbs, err := r.getOwnedClusterRoleBindings(ctx, app)
+	if err != nil {
+		return err
+	}
+
+	seenSet := make(map[string]bool, len(crbs))
+	for _, crb := range crbs {
+		seenSet[crb.Name] = false
+	}
+
+	for _, roleRef := range app.Spec.Roles {
+		log := baseLog.WithValues("kind", roleRef.Kind, "name", roleRef.Name)
+
+		if roleRef.ScopeOrDefault() != yarotskymev1alpha1.RoleBindingScopeCluster {
+			continue
+		}
+
+		name, err := app.ClusterRoleBindingNameForRoleRef(roleRef.RoleRef)
+		if err != nil {
+			baseLog.Error(err, "failed to generate name for a ClusterRoleBinding")
+			return err
+		}
+
+		log = log.WithValues("crbname", name.Name)
+
+		if !gkutil.IsClusterRole(gkutil.FromRoleRef(roleRef.RoleRef)) {
+			log.Error(err, "ClusterRoleBinding can only be created for a ClusterRole")
+			return err
+		}
+		rb := rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: name.Name},
+		}
+		result, err := controllerutil.CreateOrPatch(ctx, r.Client, &rb, func() error {
+			osdkHandler.SetOwnerAnnotations(app, &rb)
+
+			rb.Subjects = []rbacv1.Subject{
+				{
+					APIGroup:  "",
+					Kind:      "ServiceAccount",
+					Name:      serviceAccountName.Name,
+					Namespace: serviceAccountName.Namespace,
+				},
+			}
+			rb.RoleRef = roleRef.RoleRef
+
+			return nil
+		})
+		if err != nil {
+			log.Error(err, "failed to create/update a ClusterRoleBinding")
+			return err
+		}
+
+		switch result {
+		case controllerutil.OperationResultCreated:
+			log.Info("ClusterRoleBinding created")
+		case controllerutil.OperationResultUpdated:
+			log.Info("ClusterRoleBinding updated")
+		}
+		seenSet[name.Name] = true
+	}
+
+	for crbName, seen := range seenSet {
 		if seen {
 			continue
 		}
-		log = log.WithValues("name", crbName)
+		log := baseLog.WithValues("name", crbName)
 		log.Info("ClusterRoleBinding is not needed according to spec. Deleting.")
 		crb := rbacv1.ClusterRoleBinding{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: crbName,
-			},
+			ObjectMeta: metav1.ObjectMeta{Name: crbName},
 		}
 		err := r.Client.Delete(ctx, &crb)
 		if err != nil {
@@ -579,41 +602,60 @@ func (r *ApplicationReconciler) getOwnedClusterRoleBindings(ctx context.Context,
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Index "owned" ClusterRoleBinding objects by owner in our cache
-	ownerGVK, err := apiutil.GVKForObject(&yarotskymev1alpha1.Application{}, r.Scheme)
-	if err != nil {
-		return nil
-	}
 	indexer := mgr.GetFieldIndexer()
+	err := r.setupIndexes(indexer)
+	if err != nil {
+		return err
+	}
 
-	// Index owned RoleBinding objects by owner in our cache
-	err = indexer.IndexField(context.Background(), &rbacv1.RoleBinding{}, roleBindingOwnerKey, func(rawObj client.Object) []string {
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&yarotskymev1alpha1.Application{}).
+		Owns(&appsv1.Deployment{}).                                                                    // Reconcile when an owned Deployment is changed.
+		Owns(&corev1.Service{}).                                                                       // Reconcile when an owned Service is changed.
+		Owns(&corev1.ServiceAccount{}).                                                                // Reconcile when an owned AccountService is changed.
+		Owns(&networkingv1.Ingress{}).                                                                 // Reconcile when an owned Ingress is changed.
+		Owns(&rbacv1.RoleBinding{}).                                                                   // Reconcile when an owned RoleBinding is changed.
+		Watches(&rbacv1.ClusterRoleBinding{}, &osdkHandler.EnqueueRequestForAnnotation{Type: r.gk()}). // Reconcile when an "owner" ClusterRoleBinding is changed		WatchesRawSource(
+		WatchesRawSource(                                                                              // Reconcile when a new image becomes available for an Application
+			&source.Channel{Source: r.ImageUpdateEvents},
+			&handler.EnqueueRequestForObject{},
+		).
+		Complete(r)
+}
+
+func (r *ApplicationReconciler) setupIndexes(indexer client.FieldIndexer) error {
+	if err := r.setupRoleBindingIndex(indexer); err != nil {
+		return err
+	}
+
+	if err := r.setupClusterRoleBindingIndex(indexer); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Index owned RoleBinding objects by owner in our cache
+func (r *ApplicationReconciler) setupRoleBindingIndex(indexer client.FieldIndexer) error {
+	return indexer.IndexField(context.Background(), &rbacv1.RoleBinding{}, roleBindingOwnerKey, func(rawObj client.Object) []string {
 		rb := rawObj.(*rbacv1.RoleBinding)
 		owner := metav1.GetControllerOf(rb)
-		if owner == nil {
-			return nil
-		}
-		ownerAPIVersion, ownerKind := ownerGVK.ToAPIVersionAndKind()
-		if !(owner.APIVersion == ownerAPIVersion && owner.Kind == ownerKind) {
+		if !gkutil.IsApplication(gkutil.FromOwnerReference(owner)) {
 			return nil
 		}
 
 		return []string{string(owner.Name)}
 	})
-	if err != nil {
-		return err
-	}
+}
 
-	err = indexer.IndexField(context.Background(), &rbacv1.ClusterRoleBinding{}, roleBindingOwnerKey, func(rawObj client.Object) []string {
+// Index "owned" ClusterRoleBinding objects by owner in our cache
+func (r *ApplicationReconciler) setupClusterRoleBindingIndex(indexer client.FieldIndexer) error {
+	return indexer.IndexField(context.Background(), &rbacv1.ClusterRoleBinding{}, roleBindingOwnerKey, func(rawObj client.Object) []string {
 		rb := rawObj.(*rbacv1.ClusterRoleBinding)
 		annotations := rb.GetAnnotations()
 
-		if ownerGroupKind, ok := annotations[osdkHandler.TypeAnnotation]; ok {
-			gk := schema.ParseGroupKind(ownerGroupKind)
-			if !(gk.Group == ownerGVK.Group && gk.Kind == ownerGVK.Kind) {
-				return nil
-			}
-		} else {
+		ownerGroupKind := schema.ParseGroupKind(annotations[osdkHandler.TypeAnnotation])
+		if !gkutil.IsApplication(ownerGroupKind) {
 			return nil
 		}
 
@@ -622,21 +664,9 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		}
 		return nil
 	})
-	if err != nil {
-		return err
-	}
+}
 
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&yarotskymev1alpha1.Application{}).
-		Owns(&appsv1.Deployment{}).                                                                                  // Reconcile when an owned Deployment is changed.
-		Owns(&corev1.Service{}).                                                                                     // Reconcile when an owned Service is changed.
-		Owns(&corev1.ServiceAccount{}).                                                                              // Reconcile when an owned AccountService is changed.
-		Owns(&networkingv1.Ingress{}).                                                                               // Reconcile when an owned Ingress is changed.
-		Owns(&rbacv1.RoleBinding{}).                                                                                 // Reconcile when an owned RoleBinding is changed.
-		Watches(&rbacv1.ClusterRoleBinding{}, &osdkHandler.EnqueueRequestForAnnotation{Type: ownerGVK.GroupKind()}). // Reconcile when an "owner" ClusterRoleBinding is changed		WatchesRawSource(
-		WatchesRawSource(                                                                                            // Reconcile when a new image becomes available for an Application
-			&source.Channel{Source: r.ImageUpdateEvents},
-			&handler.EnqueueRequestForObject{},
-		).
-		Complete(r)
+func (r *ApplicationReconciler) gk() schema.GroupKind {
+	gvk, _ := apiutil.GVKForObject(&yarotskymev1alpha1.Application{}, r.Scheme)
+	return gvk.GroupKind()
 }

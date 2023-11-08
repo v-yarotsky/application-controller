@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	"fmt"
 
+	"git.home.yarotsky.me/vlad/application-controller/internal/gkutil"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -158,6 +159,14 @@ type ScopedRoleRef struct {
 	Scope          *RoleBindingScope `json:"scope,omitempty"`
 }
 
+func (r *ScopedRoleRef) ScopeOrDefault() RoleBindingScope {
+	scope := RoleBindingScopeNamespace
+	if r.Scope != nil {
+		scope = *r.Scope
+	}
+	return scope
+}
+
 func RoleBindingScopePointer(s RoleBindingScope) *RoleBindingScope {
 	return &s
 }
@@ -276,19 +285,30 @@ func (a *Application) IngressName() types.NamespacedName {
 }
 
 func (a *Application) RoleBindingNameForRoleRef(roleRef rbacv1.RoleRef) (types.NamespacedName, error) {
-	if roleRef.APIGroup == "rbac.authorization.k8s.io" && roleRef.Kind == "ClusterRole" {
+	gk := gkutil.FromRoleRef(roleRef)
+	if gkutil.IsClusterRole(gk) {
 		return types.NamespacedName{
 			Name:      fmt.Sprintf("%s-%s-%s", a.Name, "clusterrole", roleRef.Name),
 			Namespace: a.Namespace,
 		}, nil
-	} else if roleRef.APIGroup == "rbac.authorization.k8s.io" && roleRef.Kind == "Role" {
+	} else if gkutil.IsRole(gk) {
 		return types.NamespacedName{
 			Name:      fmt.Sprintf("%s-%s-%s", a.Name, "role", roleRef.Name),
 			Namespace: a.Namespace,
 		}, nil
 	} else {
-		return types.NamespacedName{}, fmt.Errorf("Cannot create role binding name for %s/%s", roleRef.APIGroup, roleRef.Kind)
+		return types.NamespacedName{}, fmt.Errorf("Cannot create role binding name for %s", gk.String())
 	}
+}
+
+func (a *Application) ClusterRoleBindingNameForRoleRef(roleRef rbacv1.RoleRef) (types.NamespacedName, error) {
+	gk := gkutil.FromRoleRef(roleRef)
+	if !gkutil.IsClusterRole(gk) {
+		return types.NamespacedName{}, fmt.Errorf("Cannot create cluster role binding name for %s", gk.String())
+	}
+	return types.NamespacedName{
+		Name: fmt.Sprintf("%s-%s-%s-%s", a.Namespace, a.Name, "clusterrole", roleRef.Name),
+	}, nil
 }
 
 //+kubebuilder:object:root=true

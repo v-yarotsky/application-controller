@@ -112,7 +112,7 @@ var _ = Describe("Application controller", func() {
 		By("Creating cluster role bindings for ClusterRoles")
 		Eventually(func(g Gomega) {
 			var crb rbacv1.ClusterRoleBinding
-			err := k8sClient.Get(ctx, types.NamespacedName{Name: "app1-clusterrole-my-cluster-role"}, &crb)
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: "default-app1-clusterrole-my-cluster-role"}, &crb)
 			g.Expect(err).NotTo(HaveOccurred())
 
 			g.Expect(crb.Subjects).To(ContainElement(rbacv1.Subject{
@@ -302,7 +302,7 @@ var _ = Describe("Application controller", func() {
 		app := makeApp("app4", imageRef)
 
 		crbName := types.NamespacedName{
-			Name: "app4-clusterrole-my-cluster-role",
+			Name: "default-app4-clusterrole-my-cluster-role",
 		}
 		var crb rbacv1.ClusterRoleBinding
 
@@ -375,7 +375,7 @@ var _ = Describe("Application controller", func() {
 		var crb rbacv1.ClusterRoleBinding
 		rbName := types.NamespacedName{Name: "app6-role-my-role", Namespace: app.Namespace}
 		rbClusterRoleName := types.NamespacedName{Name: "app6-clusterrole-my-cluster-role-for-namespace", Namespace: app.Namespace}
-		crbName := types.NamespacedName{Name: "app6-clusterrole-my-cluster-role"}
+		crbName := types.NamespacedName{Name: "default-app6-clusterrole-my-cluster-role"}
 
 		By("Creating the role bindings")
 		Eventually(func(g Gomega) {
@@ -428,7 +428,7 @@ var _ = Describe("Application controller", func() {
 		var crb rbacv1.ClusterRoleBinding
 		rbName := types.NamespacedName{Name: "app7-role-my-role", Namespace: app.Namespace}
 		rbClusterRoleName := types.NamespacedName{Name: "app7-clusterrole-my-cluster-role-for-namespace", Namespace: app.Namespace}
-		crbName := types.NamespacedName{Name: "app7-clusterrole-my-cluster-role"}
+		crbName := types.NamespacedName{Name: "default-app7-clusterrole-my-cluster-role"}
 
 		By("Creating the role bindings")
 		Eventually(func(g Gomega) {
