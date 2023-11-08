@@ -12,7 +12,6 @@
 - [ ] Expose meaningful status on the `Application` CR.
 - [ ] Expose status transitions on the `Application` CR (e.g. when we're updating the image).
 - [X] Garbage-collect `ClusterRoleBinding` objects (they cannot be auto-removed via ownership relationship).
-- [ ] Implement pagination when listing Applications on update check.
 - [ ] Automatically update docker images of Applications (semver).
 - [ ] E2E tests.
 
