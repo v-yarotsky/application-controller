@@ -6,9 +6,9 @@
 - [X] Automatically update docker images of Applications (digest).
 - [X] Unhardcode reference to image pull secret (accept many via configuration)
 - [X] Allow configuration of default Ingress annotations via controller config.
-- [ ] Gracefully manage updates
+- [X] Gracefully manage updates
   - [X] To Container/Service/Ingress configurations
-  - [ ] To Roles
+  - [X] To Roles
 - [ ] Expose meaningful status on the `Application` CR.
 - [ ] Expose status transitions on the `Application` CR (e.g. when we're updating the image).
 - [X] Garbage-collect `ClusterRoleBinding` objects (they cannot be auto-removed via ownership relationship).

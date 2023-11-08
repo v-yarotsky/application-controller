@@ -626,13 +626,13 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&yarotskymev1alpha1.Application{}).
-		Owns(&appsv1.Deployment{}).     // Trigger reconciliation whenever an owned Deployment is changed.
-		Owns(&corev1.Service{}).        // Trigger reconciliation whenever an owned Service is changed.
-		Owns(&corev1.ServiceAccount{}). // Trigger reconciliation whenever an owned AccountService is changed.
-		Owns(&networkingv1.Ingress{}).  // Trigger reconciliation whenever an owned Ingress is changed.
-		Owns(&rbacv1.RoleBinding{}).    // Trigger reconciliation whenever an owned RoleBinding is changed.
-		Watches(&rbacv1.ClusterRoleBinding{}, &osdkHandler.EnqueueRequestForAnnotation{Type: ownerGVK.GroupKind()}).
-		WatchesRawSource(
+		Owns(&appsv1.Deployment{}).                                                                                  // Reconcile when an owned Deployment is changed.
+		Owns(&corev1.Service{}).                                                                                     // Reconcile when an owned Service is changed.
+		Owns(&corev1.ServiceAccount{}).                                                                              // Reconcile when an owned AccountService is changed.
+		Owns(&networkingv1.Ingress{}).                                                                               // Reconcile when an owned Ingress is changed.
+		Owns(&rbacv1.RoleBinding{}).                                                                                 // Reconcile when an owned RoleBinding is changed.
+		Watches(&rbacv1.ClusterRoleBinding{}, &osdkHandler.EnqueueRequestForAnnotation{Type: ownerGVK.GroupKind()}). // Reconcile when an "owner" ClusterRoleBinding is changed		WatchesRawSource(
+		WatchesRawSource(                                                                                            // Reconcile when a new image becomes available for an Application
 			&source.Channel{Source: r.ImageUpdateEvents},
 			&handler.EnqueueRequestForObject{},
 		).
