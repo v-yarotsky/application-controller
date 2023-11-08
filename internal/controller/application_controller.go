@@ -22,10 +22,12 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -34,6 +36,7 @@ import (
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
 	"git.home.yarotsky.me/vlad/application-controller/internal/images"
+	osdkHandler "github.com/operator-framework/operator-lib/handler"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -52,7 +55,9 @@ type ApplicationReconciler struct {
 }
 
 const FinalizerName = "application.yarotsky.me/finalizer"
-const ClusterRoleBindingOwnerAnnotationName = "application.yarotsky.me/owned-by"
+
+// This is necessary to be able to query a list of RoleBinding objects owned by an Application
+const roleBindingOwnerKey = "metadata.controller"
 
 //+kubebuilder:rbac:groups=yarotsky.me,resources=applications,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=yarotsky.me,resources=applications/status,verbs=get;update;patch
@@ -246,9 +251,6 @@ func (r *ApplicationReconciler) ensureServiceAccount(ctx context.Context, app *y
 	return nil
 }
 
-// This is necessary to be able to query a list of RoleBinding objects owned by an Application
-const roleBindingOwnerKey = "metadata.controller"
-
 func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application) error {
 	log := log.FromContext(ctx)
 
@@ -260,8 +262,7 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 
 	ownedRoleBindings := &rbacv1.RoleBindingList{}
 
-	lookInAllNamespaces := client.InNamespace("")
-	err := r.Client.List(ctx, ownedRoleBindings, lookInAllNamespaces, client.MatchingFields(map[string]string{roleBindingOwnerKey: string(app.UID)}))
+	err := r.Client.List(ctx, ownedRoleBindings, client.InNamespace(app.Namespace), client.MatchingFields(map[string]string{roleBindingOwnerKey: app.Name}))
 	if err != nil {
 		log.Error(err, "failed to get the list of owned RoleBinding objects")
 		return err
@@ -272,15 +273,13 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 		seenRoleBindingsSet[rb.Name] = false
 	}
 
-	ownedClusterRoleBindings := &rbacv1.ClusterRoleBindingList{}
-	err = r.Client.List(ctx, ownedClusterRoleBindings, client.MatchingFields(map[string]string{roleBindingOwnerKey: string(app.UID)}))
+	ownedClusterRoleBindings, err := r.getOwnedClusterRoleBindings(ctx, app)
 	if err != nil {
-		log.Error(err, "failed to get the list of owned ClusterRoleBinding objects")
 		return err
 	}
 
-	seenClusterRoleBindingsSet := make(map[string]bool, len(ownedClusterRoleBindings.Items))
-	for _, crb := range ownedClusterRoleBindings.Items {
+	seenClusterRoleBindingsSet := make(map[string]bool, len(ownedClusterRoleBindings))
+	for _, crb := range ownedClusterRoleBindings {
 		seenClusterRoleBindingsSet[crb.Name] = false
 	}
 
@@ -346,7 +345,7 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 				},
 			}
 			result, err := controllerutil.CreateOrPatch(ctx, r.Client, &rb, func() error {
-				rb.SetAnnotations(map[string]string{ClusterRoleBindingOwnerAnnotationName: string(app.UID)})
+				osdkHandler.SetOwnerAnnotations(app, &rb)
 
 				rb.Subjects = []rbacv1.Subject{
 					{
@@ -548,14 +547,12 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application) error {
 	log := log.FromContext(ctx)
 
-	ownedClusterRoleBindings := &rbacv1.ClusterRoleBindingList{}
-	err := r.Client.List(ctx, ownedClusterRoleBindings, client.MatchingFields(map[string]string{roleBindingOwnerKey: string(app.UID)}))
+	ownedClusterRoleBindings, err := r.getOwnedClusterRoleBindings(ctx, app)
 	if err != nil {
-		log.Error(err, "failed to get the list of owned ClusterRoleBinding objects")
 		return err
 	}
 
-	for _, crb := range ownedClusterRoleBindings.Items {
+	for _, crb := range ownedClusterRoleBindings {
 		log = log.WithValues("kind", crb.Kind, "name", crb.Name)
 		log.Info("Deleting ClusterRoleBinding")
 		err = r.Delete(ctx, &crb)
@@ -568,32 +565,58 @@ func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context,
 	return nil
 }
 
+func (r *ApplicationReconciler) getOwnedClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application) ([]rbacv1.ClusterRoleBinding, error) {
+	log := log.FromContext(ctx)
+
+	ownedClusterRoleBindings := &rbacv1.ClusterRoleBindingList{}
+	err := r.Client.List(ctx, ownedClusterRoleBindings, client.MatchingFields(map[string]string{roleBindingOwnerKey: app.NamespacedName().String()}))
+	if err != nil {
+		log.Error(err, "failed to get the list of owned ClusterRoleBinding objects")
+		return nil, err
+	}
+	return ownedClusterRoleBindings.Items, nil
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Index "owned" ClusterRoleBinding objects by owner in our cache
+	ownerGVK, err := apiutil.GVKForObject(&yarotskymev1alpha1.Application{}, r.Scheme)
+	if err != nil {
+		return nil
+	}
 	indexer := mgr.GetFieldIndexer()
 
 	// Index owned RoleBinding objects by owner in our cache
-	err := indexer.IndexField(context.Background(), &rbacv1.RoleBinding{}, roleBindingOwnerKey, func(rawObj client.Object) []string {
+	err = indexer.IndexField(context.Background(), &rbacv1.RoleBinding{}, roleBindingOwnerKey, func(rawObj client.Object) []string {
 		rb := rawObj.(*rbacv1.RoleBinding)
 		owner := metav1.GetControllerOf(rb)
 		if owner == nil {
 			return nil
 		}
-		if owner.APIVersion != "yarotsky.me/v1alpha1" || owner.Kind != "Application" {
+		ownerAPIVersion, ownerKind := ownerGVK.ToAPIVersionAndKind()
+		if !(owner.APIVersion == ownerAPIVersion && owner.Kind == ownerKind) {
 			return nil
 		}
 
-		return []string{string(owner.UID)}
+		return []string{string(owner.Name)}
 	})
 	if err != nil {
 		return err
 	}
 
-	// Index "owned" ClusterRoleBinding objects by owner in our cache
 	err = indexer.IndexField(context.Background(), &rbacv1.ClusterRoleBinding{}, roleBindingOwnerKey, func(rawObj client.Object) []string {
 		rb := rawObj.(*rbacv1.ClusterRoleBinding)
-		if ownerUID, ok := rb.GetAnnotations()[ClusterRoleBindingOwnerAnnotationName]; ok {
-			return []string{ownerUID}
+		annotations := rb.GetAnnotations()
+
+		if ownerGroupKind, ok := annotations[osdkHandler.TypeAnnotation]; ok {
+			gk := schema.ParseGroupKind(ownerGroupKind)
+			if !(gk.Group == ownerGVK.Group && gk.Kind == ownerGVK.Kind) {
+				return nil
+			}
+		}
+
+		if ownerNamespacedName, ok := annotations[osdkHandler.NamespacedNameAnnotation]; ok {
+			return []string{ownerNamespacedName}
 		}
 		return nil
 	})
@@ -608,6 +631,7 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.ServiceAccount{}). // Trigger reconciliation whenever an owned AccountService is changed.
 		Owns(&networkingv1.Ingress{}).  // Trigger reconciliation whenever an owned Ingress is changed.
 		Owns(&rbacv1.RoleBinding{}).    // Trigger reconciliation whenever an owned RoleBinding is changed.
+		Watches(&rbacv1.ClusterRoleBinding{}, &osdkHandler.EnqueueRequestForAnnotation{Type: ownerGVK.GroupKind()}).
 		WatchesRawSource(
 			&source.Channel{Source: r.ImageUpdateEvents},
 			&handler.EnqueueRequestForObject{},

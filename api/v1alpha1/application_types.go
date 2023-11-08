@@ -231,6 +231,13 @@ type Application struct {
 	Status ApplicationStatus `json:"status,omitempty"`
 }
 
+func (a *Application) NamespacedName() types.NamespacedName {
+	return types.NamespacedName{
+		Name:      a.Name,
+		Namespace: a.Namespace,
+	}
+}
+
 func (a *Application) DeploymentName() types.NamespacedName {
 	return types.NamespacedName{
 		Name:      a.Name,

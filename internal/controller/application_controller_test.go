@@ -369,7 +369,6 @@ var _ = Describe("Application controller", func() {
 	It("Should remove rolebindings for removed roles", func(ctx SpecContext) {
 		imageRef := registry.MustUpsertTag("app6", "latest")
 		app := makeApp("app6", imageRef)
-		appName := types.NamespacedName{Name: app.Name, Namespace: app.Namespace}
 		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
 
 		var rb, rbClusterRole rbacv1.RoleBinding
@@ -389,13 +388,13 @@ var _ = Describe("Application controller", func() {
 			err = k8sClient.Get(ctx, crbName, &crb)
 			g.Expect(err).NotTo(HaveOccurred())
 
-			err = k8sClient.Get(ctx, appName, &app)
+			err = k8sClient.Get(ctx, app.NamespacedName(), &app)
 			g.Expect(err).NotTo(HaveOccurred())
 		}).WithContext(ctx).Should(Succeed())
 
 		By("Updating the Application")
 		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-			err := k8sClient.Get(ctx, appName, &app)
+			err := k8sClient.Get(ctx, app.NamespacedName(), &app)
 			if err != nil {
 				return err
 			}
@@ -415,7 +414,61 @@ var _ = Describe("Application controller", func() {
 			err = k8sClient.Get(ctx, crbName, &crb)
 			g.Expect(errors.IsNotFound(err)).To(BeTrue())
 
-			err = k8sClient.Get(ctx, appName, &app)
+			err = k8sClient.Get(ctx, app.NamespacedName(), &app)
+			g.Expect(err).NotTo(HaveOccurred())
+		}).WithContext(ctx).Should(Succeed())
+	}, SpecTimeout(5*time.Second))
+
+	It("Should backfill missing RoleBindings and ClusterRoleBindings", func(ctx SpecContext) {
+		imageRef := registry.MustUpsertTag("app7", "latest")
+		app := makeApp("app7", imageRef)
+		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+
+		var rb, rbClusterRole rbacv1.RoleBinding
+		var crb rbacv1.ClusterRoleBinding
+		rbName := types.NamespacedName{Name: "app7-role-my-role", Namespace: app.Namespace}
+		rbClusterRoleName := types.NamespacedName{Name: "app7-clusterrole-my-cluster-role-for-namespace", Namespace: app.Namespace}
+		crbName := types.NamespacedName{Name: "app7-clusterrole-my-cluster-role"}
+
+		By("Creating the role bindings")
+		Eventually(func(g Gomega) {
+			err := k8sClient.Get(ctx, rbName, &rb)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, rbClusterRoleName, &rbClusterRole)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, crbName, &crb)
+			g.Expect(err).NotTo(HaveOccurred())
+		}).WithContext(ctx).Should(Succeed())
+
+		By("Manually deleting a RoleBinding")
+		err := k8sClient.Delete(ctx, &rb)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Eventually backfilling the RoleBinding")
+		Eventually(func(g Gomega) {
+			err := k8sClient.Get(ctx, rbName, &rb)
+			g.Expect(err).NotTo(HaveOccurred())
+		}).WithContext(ctx).Should(Succeed())
+
+		By("Manually deleting a RoleBinding for a ClusterRole")
+		err = k8sClient.Delete(ctx, &rbClusterRole)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Eventually backfilling the RoleBinding for a ClusterRole")
+		Eventually(func(g Gomega) {
+			err = k8sClient.Get(ctx, rbClusterRoleName, &rbClusterRole)
+			g.Expect(err).NotTo(HaveOccurred())
+		}).WithContext(ctx).Should(Succeed())
+
+		By("Manually deleting a ClusterRoleBinding")
+		err = k8sClient.Delete(ctx, &crb)
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Eventually backfilling the ClusterRoleBinding")
+		Eventually(func(g Gomega) {
+			err = k8sClient.Get(ctx, crbName, &crb)
 			g.Expect(err).NotTo(HaveOccurred())
 		}).WithContext(ctx).Should(Succeed())
 	}, SpecTimeout(5*time.Second))
