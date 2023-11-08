@@ -17,13 +17,9 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"fmt"
-
-	"git.home.yarotsky.me/vlad/application-controller/internal/gkutil"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 )
 
 type ImageSpec struct {
@@ -238,77 +234,6 @@ type Application struct {
 
 	Spec   ApplicationSpec   `json:"spec,omitempty"`
 	Status ApplicationStatus `json:"status,omitempty"`
-}
-
-func (a *Application) NamespacedName() types.NamespacedName {
-	return types.NamespacedName{
-		Name:      a.Name,
-		Namespace: a.Namespace,
-	}
-}
-
-func (a *Application) DeploymentName() types.NamespacedName {
-	return types.NamespacedName{
-		Name:      a.Name,
-		Namespace: a.Namespace,
-	}
-}
-
-func (a *Application) SelectorLabels() map[string]string {
-	return map[string]string{
-		"app.kubernetes.io/name":       a.Name,
-		"app.kubernetes.io/managed-by": "application-controller",
-		"app.kubernetes.io/instance":   "default",
-		"app.kubernetes.io/version":    "0.1.0",
-	}
-}
-
-func (a *Application) ServiceAccountName() types.NamespacedName {
-	return types.NamespacedName{
-		Name:      a.Name,
-		Namespace: a.Namespace,
-	}
-}
-
-func (a *Application) ServiceName() types.NamespacedName {
-	return types.NamespacedName{
-		Name:      a.Name,
-		Namespace: a.Namespace,
-	}
-}
-
-func (a *Application) IngressName() types.NamespacedName {
-	return types.NamespacedName{
-		Name:      a.Name,
-		Namespace: a.Namespace,
-	}
-}
-
-func (a *Application) RoleBindingNameForRoleRef(roleRef rbacv1.RoleRef) (types.NamespacedName, error) {
-	gk := gkutil.FromRoleRef(roleRef)
-	if gkutil.IsClusterRole(gk) {
-		return types.NamespacedName{
-			Name:      fmt.Sprintf("%s-%s-%s", a.Name, "clusterrole", roleRef.Name),
-			Namespace: a.Namespace,
-		}, nil
-	} else if gkutil.IsRole(gk) {
-		return types.NamespacedName{
-			Name:      fmt.Sprintf("%s-%s-%s", a.Name, "role", roleRef.Name),
-			Namespace: a.Namespace,
-		}, nil
-	} else {
-		return types.NamespacedName{}, fmt.Errorf("Cannot create role binding name for %s", gk.String())
-	}
-}
-
-func (a *Application) ClusterRoleBindingNameForRoleRef(roleRef rbacv1.RoleRef) (types.NamespacedName, error) {
-	gk := gkutil.FromRoleRef(roleRef)
-	if !gkutil.IsClusterRole(gk) {
-		return types.NamespacedName{}, fmt.Errorf("Cannot create cluster role binding name for %s", gk.String())
-	}
-	return types.NamespacedName{
-		Name: fmt.Sprintf("%s-%s-%s-%s", a.Namespace, a.Name, "clusterrole", roleRef.Name),
-	}, nil
 }
 
 //+kubebuilder:object:root=true

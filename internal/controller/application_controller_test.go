@@ -388,13 +388,13 @@ var _ = Describe("Application controller", func() {
 			err = k8sClient.Get(ctx, crbName, &crb)
 			g.Expect(err).NotTo(HaveOccurred())
 
-			err = k8sClient.Get(ctx, app.NamespacedName(), &app)
+			err = k8sClient.Get(ctx, types.NamespacedName{Namespace: app.Namespace, Name: app.Name}, &app)
 			g.Expect(err).NotTo(HaveOccurred())
 		}).WithContext(ctx).Should(Succeed())
 
 		By("Updating the Application")
 		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-			err := k8sClient.Get(ctx, app.NamespacedName(), &app)
+			err := k8sClient.Get(ctx, types.NamespacedName{Namespace: app.Namespace, Name: app.Name}, &app)
 			if err != nil {
 				return err
 			}
@@ -414,7 +414,7 @@ var _ = Describe("Application controller", func() {
 			err = k8sClient.Get(ctx, crbName, &crb)
 			g.Expect(errors.IsNotFound(err)).To(BeTrue())
 
-			err = k8sClient.Get(ctx, app.NamespacedName(), &app)
+			err = k8sClient.Get(ctx, types.NamespacedName{Namespace: app.Namespace, Name: app.Name}, &app)
 			g.Expect(err).NotTo(HaveOccurred())
 		}).WithContext(ctx).Should(Succeed())
 	}, SpecTimeout(5*time.Second))

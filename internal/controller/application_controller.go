@@ -90,6 +90,8 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
+	namer := &simpleNamer{&app}
+
 	if app.DeletionTimestamp.IsZero() {
 		if !controllerutil.ContainsFinalizer(&app, FinalizerName) {
 			controllerutil.AddFinalizer(&app, FinalizerName)
@@ -104,7 +106,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			// not deleted via owner references, since cluster-scoped
 			// resources cannot be owned by namespaced resources.
 			log.Info("Cleaning up ClusterRoleBindings")
-			err := r.ensureNoClusterRoleBindings(ctx, &app)
+			err := r.ensureNoClusterRoleBindings(ctx, &app, namer)
 			if err != nil {
 				log.Error(err, "failed to clean up ClusterRoleBindings")
 				return ctrl.Result{}, err
@@ -121,32 +123,32 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, nil
 	}
 
-	if err := r.ensureServiceAccount(ctx, &app); err != nil {
+	if err := r.ensureServiceAccount(ctx, &app, namer); err != nil {
 		log.Error(err, "failed to ensure a ServiceAccount exists for the Application")
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureRoleBindings(ctx, &app); err != nil {
+	if err := r.ensureRoleBindings(ctx, &app, namer); err != nil {
 		log.Error(err, "failed to ensure a RoleBindings exists for the Application")
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureClusterRoleBindings(ctx, &app); err != nil {
+	if err := r.ensureClusterRoleBindings(ctx, &app, namer); err != nil {
 		log.Error(err, "failed to ensure a ClusterRoleBindings exists for the Application")
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureDeployment(ctx, &app); err != nil {
+	if err := r.ensureDeployment(ctx, &app, namer); err != nil {
 		log.Error(err, "failed to ensure a Deployment exists for the Application")
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureService(ctx, &app); err != nil {
+	if err := r.ensureService(ctx, &app, namer); err != nil {
 		log.Error(err, "failed to ensure a Service exists for the Application")
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureIngress(ctx, &app); err != nil {
+	if err := r.ensureIngress(ctx, &app, namer); err != nil {
 		log.Error(err, "failed to ensure a Ingress exists for the Application")
 		return ctrl.Result{}, err
 	}
@@ -155,8 +157,8 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	return ctrl.Result{}, nil
 }
 
-func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarotskymev1alpha1.Application) error {
-	name := app.DeploymentName()
+func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+	name := namer.DeploymentName()
 	log := log.FromContext(ctx).WithValues("deploymentname", name.String())
 
 	deploy := appsv1.Deployment{
@@ -173,7 +175,7 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 	}
 
 	result, err := controllerutil.CreateOrPatch(ctx, r.Client, &deploy, func() error {
-		selectorLabels := app.SelectorLabels()
+		selectorLabels := namer.SelectorLabels()
 
 		deploy.Spec.Selector = &metav1.LabelSelector{
 			MatchLabels: selectorLabels,
@@ -184,7 +186,7 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 		}
 
 		podTemplateSpec := &deploy.Spec.Template.Spec
-		podTemplateSpec.ServiceAccountName = app.ServiceAccountName().Name
+		podTemplateSpec.ServiceAccountName = namer.ServiceAccountName().Name
 
 		var container *corev1.Container
 		if len(podTemplateSpec.Containers) == 0 {
@@ -228,8 +230,8 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 	return nil
 }
 
-func (r *ApplicationReconciler) ensureServiceAccount(ctx context.Context, app *yarotskymev1alpha1.Application) error {
-	name := app.ServiceAccountName()
+func (r *ApplicationReconciler) ensureServiceAccount(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+	name := namer.ServiceAccountName()
 	log := log.FromContext(ctx).WithValues("serviceaccountname", name.String())
 
 	var sa corev1.ServiceAccount
@@ -261,10 +263,10 @@ func (r *ApplicationReconciler) ensureServiceAccount(ctx context.Context, app *y
 	return nil
 }
 
-func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application) error {
+func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	baseLog := log.FromContext(ctx)
 
-	serviceAccountName := app.ServiceAccountName()
+	serviceAccountName := namer.ServiceAccountName()
 
 	rbs := &rbacv1.RoleBindingList{}
 
@@ -282,7 +284,7 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 	for _, roleRef := range app.Spec.Roles {
 		log := baseLog.WithValues("kind", roleRef.Kind, "name", roleRef.Name)
 
-		name, err := app.RoleBindingNameForRoleRef(roleRef.RoleRef)
+		name, err := namer.RoleBindingName(roleRef.RoleRef)
 		if err != nil {
 			log.Error(err, "failed to generate name for a RoleBinding")
 			return err
@@ -352,12 +354,12 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 	return nil
 }
 
-func (r *ApplicationReconciler) ensureClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application) error {
+func (r *ApplicationReconciler) ensureClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	baseLog := log.FromContext(ctx)
 
-	serviceAccountName := app.ServiceAccountName()
+	serviceAccountName := namer.ServiceAccountName()
 
-	crbs, err := r.getOwnedClusterRoleBindings(ctx, app)
+	crbs, err := r.getOwnedClusterRoleBindings(ctx, namer)
 	if err != nil {
 		return err
 	}
@@ -374,7 +376,7 @@ func (r *ApplicationReconciler) ensureClusterRoleBindings(ctx context.Context, a
 			continue
 		}
 
-		name, err := app.ClusterRoleBindingNameForRoleRef(roleRef.RoleRef)
+		name, err := namer.ClusterRoleBindingName(roleRef.RoleRef)
 		if err != nil {
 			baseLog.Error(err, "failed to generate name for a ClusterRoleBinding")
 			return err
@@ -437,8 +439,8 @@ func (r *ApplicationReconciler) ensureClusterRoleBindings(ctx context.Context, a
 	return nil
 }
 
-func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotskymev1alpha1.Application) error {
-	name := app.ServiceName()
+func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+	name := namer.ServiceName()
 	log := log.FromContext(ctx).WithValues("servicename", name.String())
 
 	svc := corev1.Service{
@@ -459,7 +461,7 @@ func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotsky
 			})
 		}
 		svc.Spec.Ports = ports
-		svc.Spec.Selector = app.SelectorLabels()
+		svc.Spec.Selector = namer.SelectorLabels()
 		if err := controllerutil.SetControllerReference(app, &svc, r.Scheme); err != nil {
 			log.Error(err, "failed to set controller reference on Service")
 			return err
@@ -481,8 +483,8 @@ func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotsky
 	return nil
 }
 
-func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotskymev1alpha1.Application) error {
-	name := app.IngressName()
+func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+	name := namer.IngressName()
 	log := log.FromContext(ctx).WithValues("ingressname", name.String())
 
 	if app.Spec.Ingress == nil {
@@ -534,7 +536,7 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 								PathType: &pathType,
 								Backend: networkingv1.IngressBackend{
 									Service: &networkingv1.IngressServiceBackend{
-										Name: app.ServiceName().Name,
+										Name: namer.ServiceName().Name,
 										Port: networkingv1.ServiceBackendPort{
 											Name: portName,
 										},
@@ -567,10 +569,10 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 	return nil
 }
 
-func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application) error {
+func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	log := log.FromContext(ctx)
 
-	ownedClusterRoleBindings, err := r.getOwnedClusterRoleBindings(ctx, app)
+	ownedClusterRoleBindings, err := r.getOwnedClusterRoleBindings(ctx, namer)
 	if err != nil {
 		return err
 	}
@@ -588,11 +590,11 @@ func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context,
 	return nil
 }
 
-func (r *ApplicationReconciler) getOwnedClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application) ([]rbacv1.ClusterRoleBinding, error) {
+func (r *ApplicationReconciler) getOwnedClusterRoleBindings(ctx context.Context, namer Namer) ([]rbacv1.ClusterRoleBinding, error) {
 	log := log.FromContext(ctx)
 
 	ownedClusterRoleBindings := &rbacv1.ClusterRoleBindingList{}
-	err := r.Client.List(ctx, ownedClusterRoleBindings, client.MatchingFields(map[string]string{roleBindingOwnerKey: app.NamespacedName().String()}))
+	err := r.Client.List(ctx, ownedClusterRoleBindings, client.MatchingFields(map[string]string{roleBindingOwnerKey: namer.ApplicationName().String()}))
 	if err != nil {
 		log.Error(err, "failed to get the list of owned ClusterRoleBinding objects")
 		return nil, err
