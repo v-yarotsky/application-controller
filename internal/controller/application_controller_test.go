@@ -391,11 +391,6 @@ var _ = Describe("Application controller", func() {
 
 			err = k8sClient.Get(ctx, appName, &app)
 			g.Expect(err).NotTo(HaveOccurred())
-
-			g.Expect(app.Status.ClusterRoleBindings).To(ContainElement(yarotskymev1alpha1.ClusterRoleBindingRef{
-				Name: crb.Name,
-				UID:  crb.UID,
-			}))
 		}).WithContext(ctx).Should(Succeed())
 
 		By("Updating the Application")

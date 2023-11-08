@@ -97,13 +97,9 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			// Clean up ClusterRoleBinding objects, if any; these are
 			// not deleted via owner references, since cluster-scoped
 			// resources cannot be owned by namespaced resources.
-			done, err := r.ensureNoClusterRoleBindings(ctx, &app)
+			err := r.ensureNoClusterRoleBindings(ctx, &app)
 			if err != nil {
 				return ctrl.Result{}, err
-			}
-
-			if !done {
-				return ctrl.Result{}, nil
 			}
 
 			controllerutil.RemoveFinalizer(&app, FinalizerName)
@@ -265,7 +261,7 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 	ownedRoleBindings := &rbacv1.RoleBindingList{}
 
 	lookInAllNamespaces := client.InNamespace("")
-	err := r.Client.List(ctx, ownedRoleBindings, lookInAllNamespaces, client.MatchingFields(map[string]string{roleBindingOwnerKey: app.Name}))
+	err := r.Client.List(ctx, ownedRoleBindings, lookInAllNamespaces, client.MatchingFields(map[string]string{roleBindingOwnerKey: string(app.UID)}))
 	if err != nil {
 		log.Error(err, "failed to get the list of owned RoleBinding objects")
 		return err
@@ -288,7 +284,6 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 		seenClusterRoleBindingsSet[crb.Name] = false
 	}
 
-	// TODO this actually needs to make sure to delete rolebindings, too
 	for _, roleRef := range app.Spec.Roles {
 		log = log.WithValues("kind", roleRef.Kind, "name", roleRef.Name)
 
@@ -373,15 +368,6 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 			switch result {
 			case controllerutil.OperationResultCreated:
 				log.Info("ClusterRoleBinding created")
-				app.Status.ClusterRoleBindings = append(app.Status.ClusterRoleBindings, yarotskymev1alpha1.ClusterRoleBindingRef{
-					Name: rb.Name,
-					UID:  rb.UID,
-				})
-				err := r.Client.Status().Update(ctx, app)
-				if err != nil {
-					log.Error(err, "failed to track ownership of ClusterRoleBinding")
-					return err
-				}
 			case controllerutil.OperationResultUpdated:
 				log.Info("ClusterRoleBinding updated")
 			}
@@ -559,29 +545,27 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 	return nil
 }
 
-func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application) (done bool, err error) {
+func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application) error {
 	log := log.FromContext(ctx)
 
-	if len(app.Status.ClusterRoleBindings) == 0 {
-		log.Info("No ClusterRoleBinding objects left")
-		return true, nil
+	ownedClusterRoleBindings := &rbacv1.ClusterRoleBindingList{}
+	err := r.Client.List(ctx, ownedClusterRoleBindings, client.MatchingFields(map[string]string{roleBindingOwnerKey: string(app.UID)}))
+	if err != nil {
+		log.Error(err, "failed to get the list of owned ClusterRoleBinding objects")
+		return err
 	}
 
-	ref := app.Status.ClusterRoleBindings[0]
-	crb := &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: ref.Name,
-			UID:  ref.UID,
-		},
+	for _, crb := range ownedClusterRoleBindings.Items {
+		log = log.WithValues("kind", crb.Kind, "name", crb.Name)
+		log.Info("Deleting ClusterRoleBinding")
+		err = r.Delete(ctx, &crb)
+		if err != nil {
+			log.Error(err, "failed to delete ClusterRoleBinding")
+			return err
+		}
 	}
-	log = log.WithValues("clusterrolebindingname", ref.Name, "clusterrolebindinguid", ref.UID)
-	log.Info("Deleting ClusterRoleBinding")
-	if err := r.Delete(ctx, crb); err != nil {
-		log.Error(err, "failed to delete ClusterRoleBinding")
-		return false, err
-	}
-	app.Status.ClusterRoleBindings = app.Status.ClusterRoleBindings[1:]
-	return false, r.Client.Status().Update(ctx, app)
+
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -599,7 +583,7 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			return nil
 		}
 
-		return []string{owner.Name}
+		return []string{string(owner.UID)}
 	})
 	if err != nil {
 		return err
