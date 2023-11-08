@@ -613,6 +613,8 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			if !(gk.Group == ownerGVK.Group && gk.Kind == ownerGVK.Kind) {
 				return nil
 			}
+		} else {
+			return nil
 		}
 
 		if ownerNamespacedName, ok := annotations[osdkHandler.NamespacedNameAnnotation]; ok {
