@@ -365,4 +365,63 @@ var _ = Describe("Application controller", func() {
 			g.Expect(mainContainer.Env).To(ContainElement(corev1.EnvVar{Name: "MY_ENV_VAR", Value: "FOO"}))
 		}).WithContext(ctx).Should(Succeed())
 	}, SpecTimeout(5*time.Second))
+
+	It("Should remove rolebindings for removed roles", func(ctx SpecContext) {
+		imageRef := registry.MustUpsertTag("app6", "latest")
+		app := makeApp("app6", imageRef)
+		appName := types.NamespacedName{Name: app.Name, Namespace: app.Namespace}
+		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+
+		var rb, rbClusterRole rbacv1.RoleBinding
+		var crb rbacv1.ClusterRoleBinding
+		rbName := types.NamespacedName{Name: "app6-role-my-role", Namespace: app.Namespace}
+		rbClusterRoleName := types.NamespacedName{Name: "app6-clusterrole-my-cluster-role-for-namespace", Namespace: app.Namespace}
+		crbName := types.NamespacedName{Name: "app6-clusterrole-my-cluster-role"}
+
+		By("Creating the role bindings")
+		Eventually(func(g Gomega) {
+			err := k8sClient.Get(ctx, rbName, &rb)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, rbClusterRoleName, &rbClusterRole)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, crbName, &crb)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, appName, &app)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			g.Expect(app.Status.ClusterRoleBindings).To(ContainElement(yarotskymev1alpha1.ClusterRoleBindingRef{
+				Name: crb.Name,
+				UID:  crb.UID,
+			}))
+		}).WithContext(ctx).Should(Succeed())
+
+		By("Updating the Application")
+		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
+			err := k8sClient.Get(ctx, appName, &app)
+			if err != nil {
+				return err
+			}
+			app.Spec.Roles = []yarotskymev1alpha1.ScopedRoleRef{}
+			return k8sClient.Update(ctx, &app)
+		})
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Eventually removing the role bindings")
+		Eventually(func(g Gomega) {
+			err := k8sClient.Get(ctx, rbName, &rb)
+			g.Expect(errors.IsNotFound(err)).To(BeTrue())
+
+			err = k8sClient.Get(ctx, rbClusterRoleName, &rbClusterRole)
+			g.Expect(errors.IsNotFound(err)).To(BeTrue())
+
+			err = k8sClient.Get(ctx, crbName, &crb)
+			g.Expect(errors.IsNotFound(err)).To(BeTrue())
+
+			err = k8sClient.Get(ctx, appName, &app)
+			g.Expect(err).NotTo(HaveOccurred())
+		}).WithContext(ctx).Should(Succeed())
+	}, SpecTimeout(5*time.Second))
 })
