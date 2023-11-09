@@ -83,7 +83,11 @@ func (r *ImageRef) ToGoContainerRegistryReference() name.Reference {
 }
 
 func (f *imageFinder) FindImage(ctx context.Context, spec yarotskymev1alpha1.ImageSpec) (string, error) {
-	// TODO: handle other version strategies besides `digest`
+	// TODO: handle other version strategies besides `Digest`
+	if spec.VersionStrategy != yarotskymev1alpha1.VersionStrategyDigest {
+		return "", fmt.Errorf(`"Digest" is currently the only supported versionStrategy.`)
+	}
+
 	tagRef := ImageRef{Repository: spec.Repository, Tag: spec.Digest.Tag}
 
 	descriptor, err := remote.Get(tagRef.ToGoContainerRegistryReference(), remote.WithContext(ctx), remote.WithAuthFromKeychain(f.keychain))

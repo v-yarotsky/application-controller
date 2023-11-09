@@ -11,7 +11,7 @@ metadata:
 spec:
   image:
     repository: "git.home.yarotsky.me/vlad/dashboard"
-    versionStrategy: "digest"
+    versionStrategy: "Digest"
     digest:
       tag: "v0.1.0"
   ports:
@@ -24,4 +24,4 @@ spec:
   - apiGroup: "rbac.authorization.k8s.io"
     kind: "ClusterRole"
     name: "dashboard"
-    scope: "cluster"
+    scope: "Cluster"

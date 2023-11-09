@@ -24,8 +24,8 @@ func TestImageFinder(t *testing.T) {
 
 	versionSpec := yarotskymev1alpha1.ImageSpec{
 		Repository:      fmt.Sprintf("%s/foo", s.URL.Host),
-		VersionStrategy: "digest",
-		Digest: yarotskymev1alpha1.VersionStrategyDigest{
+		VersionStrategy: "Digest",
+		Digest: yarotskymev1alpha1.VersionStrategyDigestSpec{
 			Tag: "latest",
 		},
 	}

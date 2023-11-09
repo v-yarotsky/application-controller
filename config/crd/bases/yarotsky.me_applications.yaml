@@ -185,9 +185,9 @@ spec:
                     description: OCI Image repository.
                     type: string
                   versionStrategy:
-                    description: 'Version selection strategy, e.g. `digest`. Available
-                      strategies: - `digest` - looks for the most recently uploaded
-                      digest of a mutable tag'
+                    description: Version selection strategy, e.g. `Digest`.
+                    enum:
+                    - Digest
                     type: string
                 required:
                 - repository
@@ -618,6 +618,8 @@ spec:
                     type: object
                 type: object
               roles:
+                description: List of Roles and ClusterRoles to bind to the ServiceAccount
+                  of this application.
                 items:
                   properties:
                     apiGroup:
@@ -633,6 +635,9 @@ spec:
                       description: RoleBindingScope determines whether a namespaced
                         RoleBinding or a cluster-scoped ClusterRoleBinding is created
                         when referring to a ClusterRole.
+                      enum:
+                      - Cluster
+                      - Namespace
                       type: string
                   required:
                   - apiGroup

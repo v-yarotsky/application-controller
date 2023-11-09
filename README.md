@@ -13,7 +13,8 @@
 - [ ] Expose status transitions on the `Application` CR (e.g. when we're updating the image).
 - [X] Garbage-collect `ClusterRoleBinding` objects (they cannot be auto-removed via ownership relationship).
 - [ ] Automatically update docker images of Applications (semver).
-- [ ] E2E tests.
+- [ ] Add `replicas`
+- [ ] Add `apps` short name
 
 ## Description
 // TODO(user): An in-depth paragraph about your project and overview of use

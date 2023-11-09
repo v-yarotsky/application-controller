@@ -22,22 +22,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-type ImageSpec struct {
-	// OCI Image repository.
-	Repository string `json:"repository"`
-
-	// Version selection strategy, e.g. `digest`.
-	// Available strategies:
-	// - `digest` - looks for the most recently uploaded digest of a mutable tag
-	VersionStrategy string                `json:"versionStrategy"`
-	Digest          VersionStrategyDigest `json:"digest,omitempty"`
-}
-
-type VersionStrategyDigest struct {
-	// Mutable tag to watch for new digests.
-	Tag string `json:"tag"`
-}
-
 // ApplicationSpec defines the desired state of Application
 type ApplicationSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
@@ -132,11 +116,42 @@ type ApplicationSpec struct {
 	// +patchStrategy=merge,retainKeys
 	Volumes []Volume `json:"volumes,omitempty"`
 
+	// +optional
 	Ingress *Ingress `json:"ingress,omitempty"`
 
-	Metrics Metrics `json:"metrics,omitempty"`
+	// +optional
+	Metrics *Metrics `json:"metrics,omitempty"`
 
+	// List of Roles and ClusterRoles to bind to the ServiceAccount of
+	// this application.
+	// +optional
+	// +patchMergeKey=name
+	// +patchStrategy=merge,retainKeys
 	Roles []ScopedRoleRef `json:"roles,omitempty"`
+}
+
+type ImageSpec struct {
+	// OCI Image repository.
+	Repository string `json:"repository"`
+
+	// Version selection strategy, e.g. `Digest`.
+	// +kubebuilder:validation:Enum=Digest
+	VersionStrategy VersionStrategy           `json:"versionStrategy"`
+	Digest          VersionStrategyDigestSpec `json:"digest,omitempty"`
+}
+
+// VersionStrategy determines how the controller checks for the new
+// versions of Application images.
+// +enum
+type VersionStrategy string
+
+const (
+	VersionStrategyDigest = VersionStrategy("Digest")
+)
+
+type VersionStrategyDigestSpec struct {
+	// Mutable tag to watch for new digests.
+	Tag string `json:"tag"`
 }
 
 // RoleBindingScope determines whether a namespaced RoleBinding
@@ -146,13 +161,15 @@ type ApplicationSpec struct {
 type RoleBindingScope string
 
 const (
-	RoleBindingScopeNamespace = RoleBindingScope("namespace")
-	RoleBindingScopeCluster   = RoleBindingScope("cluster")
+	RoleBindingScopeNamespace = RoleBindingScope("Namespace")
+	RoleBindingScopeCluster   = RoleBindingScope("Cluster")
 )
 
 type ScopedRoleRef struct {
 	rbacv1.RoleRef `json:",inline"`
-	Scope          *RoleBindingScope `json:"scope,omitempty"`
+
+	// +kubebuilder:validation:Enum=Cluster;Namespace
+	Scope *RoleBindingScope `json:"scope,omitempty"`
 }
 
 func (r *ScopedRoleRef) ScopeOrDefault() RoleBindingScope {
