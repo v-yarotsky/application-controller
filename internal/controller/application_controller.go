@@ -106,17 +106,21 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			// not deleted via owner references, since cluster-scoped
 			// resources cannot be owned by namespaced resources.
 			log.Info("Cleaning up ClusterRoleBindings")
-			err := r.ensureNoClusterRoleBindings(ctx, &app, namer)
+			done, err := r.ensureNoClusterRoleBindings(ctx, &app, namer)
 			if err != nil {
 				log.Error(err, "failed to clean up ClusterRoleBindings")
 				return ctrl.Result{}, err
 			}
 
-			log.Info("Removing finalizer")
-			controllerutil.RemoveFinalizer(&app, FinalizerName)
-			if err := r.Update(ctx, &app); err != nil {
-				log.Error(err, "failed to remove finalizer")
-				return ctrl.Result{}, err
+			// Only remove finalizer after all the ClusterRoleBinding objects have been removed
+			// to avoid a racing reconcile calls triggered by deleted ClusterRoleBindings.
+			if done {
+				log.Info("Removing finalizer")
+				controllerutil.RemoveFinalizer(&app, FinalizerName)
+				if err := r.Update(ctx, &app); err != nil {
+					log.Error(err, "failed to remove finalizer")
+					return ctrl.Result{}, err
+				}
 			}
 		}
 		// we are in the process of deletion
@@ -569,12 +573,12 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 	return nil
 }
 
-func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) (bool, error) {
 	log := log.FromContext(ctx)
 
 	ownedClusterRoleBindings, err := r.getOwnedClusterRoleBindings(ctx, namer)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	for _, crb := range ownedClusterRoleBindings {
@@ -583,11 +587,11 @@ func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context,
 		err = r.Delete(ctx, &crb)
 		if err != nil {
 			log.Error(err, "failed to delete ClusterRoleBinding")
-			return err
+			return false, err
 		}
 	}
 
-	return nil
+	return true, nil
 }
 
 func (r *ApplicationReconciler) getOwnedClusterRoleBindings(ctx context.Context, namer Namer) ([]rbacv1.ClusterRoleBinding, error) {
