@@ -110,6 +110,7 @@ var _ = BeforeSuite(func() {
 		DefaultIngressAnnotations: map[string]string{
 			"foo": "bar",
 		},
+		Recorder: k8sManager.GetEventRecorderFor(Name),
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 

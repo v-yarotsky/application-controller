@@ -452,7 +452,7 @@ var _ = Describe("Application controller", func() {
 		})
 
 		By("Setting the Ready status condition to False")
-		EventuallyHaveCondition(ctx, &app, "Ready", metav1.ConditionFalse, "UpsertIngressError")
+		EventuallyHaveCondition(ctx, &app, "Ready", metav1.ConditionFalse, "IngressUpsertFailed")
 
 		By("Fixing the ingress")
 		EventuallyUpdateApp(ctx, &app, func() {

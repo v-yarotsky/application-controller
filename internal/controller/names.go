@@ -92,7 +92,7 @@ func (a *simpleNamer) ClusterRoleBindingName(roleRef rbacv1.RoleRef) (types.Name
 func (a *simpleNamer) SelectorLabels() map[string]string {
 	return map[string]string{
 		"app.kubernetes.io/name":       a.Name,
-		"app.kubernetes.io/managed-by": "application-controller",
+		"app.kubernetes.io/managed-by": Name,
 		"app.kubernetes.io/instance":   "default",
 		"app.kubernetes.io/version":    "0.1.0",
 	}

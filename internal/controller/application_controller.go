@@ -26,6 +26,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -48,6 +49,41 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	Name = "application-controller"
+
+	EventClusterRoleBindingCreated      = "ClusterRoleBindingCreated"
+	EventClusterRoleBindingUpdated      = "ClusterRoleBindingUpdated"
+	EventClusterRoleBindingUpsertFailed = "ClusterRoleBindingUpsertFailed"
+	EventDeleteClusterRoleBindingFailed = "DeleteClusterRoleBindingFailed"
+	EventDeletingClusterRoleBinding     = "DeletingClusterRoleBinding"
+
+	EventDeploymentCreated      = "DeploymentCreated"
+	EventDeploymentUpdated      = "DeploymentUpdated"
+	EventDeploymentUpsertFailed = "DeploymentUpsertFailed"
+
+	EventImageCheckFailed = "ImageCheckFailed"
+	EventImageUpdated     = "ImageUpdated"
+
+	EventIngressCreated      = "IngressCreated"
+	EventIngressUpdated      = "IngressUpdated"
+	EventIngressUpsertFailed = "IngressUpsertFailed"
+
+	EventReasonCleanup = "Cleanup"
+
+	EventRoleBindingCreated      = "RoleBindingCreated"
+	EventRoleBindingUpdated      = "RoleBindingUpdated"
+	EventRoleBindingUpsertFailed = "RoleBindingUpsertFailed"
+
+	EventServiceAccountCreated      = "ServiceAccountCreated"
+	EventServiceAccountUpdated      = "ServiceAccountUpdated"
+	EventServiceAccountUpsertFailed = "ServiceAccountUpsertFailed"
+
+	EventServiceCreated      = "ServiceCreated"
+	EventServiceUpdated      = "ServiceUpdated"
+	EventServiceUpsertFailed = "ServiceUpsertFailed"
+)
+
 // ApplicationReconciler reconciles a Application object
 type ApplicationReconciler struct {
 	ImageFinder               images.ImageFinder
@@ -55,7 +91,8 @@ type ApplicationReconciler struct {
 	DefaultIngressClassName   string
 	DefaultIngressAnnotations map[string]string
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
 const FinalizerName = "application.yarotsky.me/finalizer"
@@ -75,6 +112,7 @@ const roleBindingOwnerKey = "metadata.controller"
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=bind
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=bind
+//+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -115,6 +153,8 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			// not deleted via owner references, since cluster-scoped
 			// resources cannot be owned by namespaced resources.
 			log.Info("Cleaning up ClusterRoleBindings")
+			r.Recorder.Eventf(&app, corev1.EventTypeNormal, EventReasonCleanup, "Removing ClusterRoleBindings, if any")
+
 			done, err := r.ensureNoClusterRoleBindings(ctx, &app, namer)
 			if err != nil {
 				log.Error(err, "failed to clean up ClusterRoleBindings")
@@ -194,6 +234,7 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 	imgRef, err := r.ImageFinder.FindImage(ctx, app.Spec.Image)
 	if err != nil {
 		log.Error(err, "failed to find the latest version of the image")
+		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventImageCheckFailed, "New image version check failed: %s", err.Error())
 		return nil, err
 	}
 
@@ -226,6 +267,7 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 		container.Name = app.Name
 		if container.Image != imgRef {
 			log.Info("Updating container image", "oldimage", container.Image, "newimage", imgRef)
+			r.Recorder.Eventf(app, corev1.EventTypeNormal, EventImageUpdated, "Updating image %s -> %s", container.Image, imgRef)
 			app.Status.Image = imgRef
 			app.Status.ImageLastUpdateTime = metav1.Now()
 		}
@@ -258,10 +300,11 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 	})
 	if err != nil {
 		log.Error(err, "failed to create/update the Deployment")
+		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventDeploymentUpsertFailed, "Could not upsert Deployment %s: %s", name, err)
 		statusErr := r.setConditions(ctx, app, metav1.Condition{
 			Type:    yarotskymev1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
-			Reason:  "UpsertDeploymentFailed",
+			Reason:  EventDeploymentUpsertFailed,
 			Message: fmt.Sprintf("Failed to upsert a Deployment: %s", err.Error()),
 		})
 		return nil, multierr.Combine(err, statusErr)
@@ -270,8 +313,10 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 	switch result {
 	case controllerutil.OperationResultCreated:
 		log.Info("Created Deployment")
+		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventDeploymentCreated, "Deployment %s has been created", name)
 	case controllerutil.OperationResultUpdated:
 		log.Info("Updated Deployment")
+		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventDeploymentUpdated, "Deployment %s has been updated", name)
 	}
 
 	if err := r.Status().Update(ctx, app); err != nil {
@@ -303,10 +348,11 @@ func (r *ApplicationReconciler) ensureServiceAccount(ctx context.Context, app *y
 	})
 	if err != nil {
 		log.Error(err, "failed to create/update the ServiceACcount")
+		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventServiceAccountUpsertFailed, "Could not upsert service account %s: %s", name, err)
 		statusErr := r.setConditions(ctx, app, metav1.Condition{
 			Type:    yarotskymev1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
-			Reason:  "UpsertServiceAccountFailed",
+			Reason:  EventServiceAccountUpsertFailed,
 			Message: fmt.Sprintf("Failed to upsert a ServiceAccount: %s", err.Error()),
 		})
 		return multierr.Combine(err, statusErr)
@@ -315,8 +361,10 @@ func (r *ApplicationReconciler) ensureServiceAccount(ctx context.Context, app *y
 	switch result {
 	case controllerutil.OperationResultCreated:
 		log.Info("Created ServiceAccount")
+		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventServiceAccountCreated, "ServiceAccount %s has been created", name)
 	case controllerutil.OperationResultUpdated:
 		log.Info("Updated ServiceAccount")
+		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventServiceAccountUpdated, "ServiceAccount %s has been updated", name)
 	}
 	return nil
 }
@@ -378,10 +426,11 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 		})
 		if err != nil {
 			log.Error(err, "failed to create/update RoleBinding")
+			r.Recorder.Eventf(app, corev1.EventTypeWarning, EventRoleBindingUpsertFailed, "Could not upsert RoleBinding %s: %s", name, err)
 			statusErr := r.setConditions(ctx, app, metav1.Condition{
 				Type:    yarotskymev1alpha1.ConditionReady,
 				Status:  metav1.ConditionFalse,
-				Reason:  "UpsertRoleBindingError",
+				Reason:  EventRoleBindingUpsertFailed,
 				Message: fmt.Sprintf("Failed to upsert a RoleBinding: %s", err.Error()),
 			})
 			return multierr.Combine(err, statusErr)
@@ -390,8 +439,10 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 		switch result {
 		case controllerutil.OperationResultCreated:
 			log.Info("RoleBinding created")
+			r.Recorder.Eventf(app, corev1.EventTypeNormal, EventRoleBindingCreated, "RoleBinding %s has been created", name)
 		case controllerutil.OperationResultUpdated:
 			log.Info("RoleBinding updated")
+			r.Recorder.Eventf(app, corev1.EventTypeNormal, EventRoleBindingUpdated, "RoleBinding %s has been updated", name)
 		}
 		seenSet[name.Name] = true
 	}
@@ -472,10 +523,11 @@ func (r *ApplicationReconciler) ensureClusterRoleBindings(ctx context.Context, a
 		})
 		if err != nil {
 			log.Error(err, "failed to create/update a ClusterRoleBinding")
+			r.Recorder.Eventf(app, corev1.EventTypeWarning, EventClusterRoleBindingUpsertFailed, "Could not upsert ClusterRoleBinding %s: %s", name, err)
 			statusErr := r.setConditions(ctx, app, metav1.Condition{
 				Type:    yarotskymev1alpha1.ConditionReady,
 				Status:  metav1.ConditionFalse,
-				Reason:  "UpsertClusterRoleBindingError",
+				Reason:  EventClusterRoleBindingUpsertFailed,
 				Message: fmt.Sprintf("Failed to upsert a ClusterRoleBinding: %s", err.Error()),
 			})
 			return multierr.Combine(err, statusErr)
@@ -484,8 +536,10 @@ func (r *ApplicationReconciler) ensureClusterRoleBindings(ctx context.Context, a
 		switch result {
 		case controllerutil.OperationResultCreated:
 			log.Info("ClusterRoleBinding created")
+			r.Recorder.Eventf(app, corev1.EventTypeNormal, EventClusterRoleBindingCreated, "ClusterRoleBinding %s has been created", name)
 		case controllerutil.OperationResultUpdated:
 			log.Info("ClusterRoleBinding updated")
+			r.Recorder.Eventf(app, corev1.EventTypeNormal, EventClusterRoleBindingUpdated, "ClusterRoleBinding %s has been updated", name)
 		}
 		seenSet[name.Name] = true
 	}
@@ -541,10 +595,11 @@ func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotsky
 
 	if err != nil {
 		log.Error(err, "failed to create/update the Service")
+		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventServiceUpsertFailed, "Could not upsert Service %s: %s", name, err)
 		statusErr := r.setConditions(ctx, app, metav1.Condition{
 			Type:    yarotskymev1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
-			Reason:  "UpsertServiceError",
+			Reason:  EventServiceUpsertFailed,
 			Message: fmt.Sprintf("Failed to upsert a Service: %s", err.Error()),
 		})
 		return multierr.Combine(err, statusErr)
@@ -553,8 +608,10 @@ func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotsky
 	switch result {
 	case controllerutil.OperationResultCreated:
 		log.Info("Created Service")
+		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventServiceCreated, "Service %s has been created", name)
 	case controllerutil.OperationResultUpdated:
 		log.Info("Updated Service")
+		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventServiceUpdated, "Service %s has been updated", name)
 	}
 	return nil
 }
@@ -633,10 +690,11 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 
 	if err != nil {
 		log.Error(err, "failed to create/update the Ingress")
+		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventIngressUpsertFailed, "Could not upsert Ingress %s: %s", name, err)
 		statusErr := r.setConditions(ctx, app, metav1.Condition{
 			Type:    yarotskymev1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
-			Reason:  "UpsertIngressError",
+			Reason:  EventIngressUpsertFailed,
 			Message: fmt.Sprintf("Failed to upsert an Ingress: %s", err.Error()),
 		})
 		return multierr.Combine(err, statusErr)
@@ -645,8 +703,10 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 	switch result {
 	case controllerutil.OperationResultCreated:
 		log.Info("Created Ingress")
+		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventIngressCreated, "Ingress %s has been created", name)
 	case controllerutil.OperationResultUpdated:
 		log.Info("Updated Ingress")
+		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventIngressUpdated, "Ingress %s has been updated", name)
 	}
 	return nil
 }
@@ -662,9 +722,11 @@ func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context,
 	for _, crb := range ownedClusterRoleBindings {
 		log = log.WithValues("kind", crb.Kind, "name", crb.Name)
 		log.Info("Deleting ClusterRoleBinding")
+		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventDeletingClusterRoleBinding, "Deleting ClusterRoleBinding %s", crb.Name)
 		err = r.Delete(ctx, &crb)
 		if err != nil {
 			log.Error(err, "failed to delete ClusterRoleBinding")
+			r.Recorder.Eventf(app, corev1.EventTypeWarning, EventDeleteClusterRoleBindingFailed, "Could not delete ClusterRoleBinding %s: %s", crb.Name, err.Error())
 			return false, err
 		}
 	}
