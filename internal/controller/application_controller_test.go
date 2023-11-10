@@ -14,8 +14,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/pointer"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
@@ -100,20 +100,14 @@ var _ = Describe("Application controller", func() {
 		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
 
 		By("Creating a service account")
-		serviceAccountName := types.NamespacedName{
-			Name:      app.Name,
-			Namespace: app.Namespace,
-		}
-		Eventually(func(g Gomega) {
-			var serviceAccount corev1.ServiceAccount
-			err := k8sClient.Get(ctx, serviceAccountName, &serviceAccount)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).WithContext(ctx).Should(Succeed())
+		serviceAccountName := mkName(app.Namespace, app.Name)
+		var serviceAccount corev1.ServiceAccount
+		EventuallyGetObject(ctx, serviceAccountName, &serviceAccount)
 
 		By("Creating cluster role bindings for ClusterRoles")
 		Eventually(func(g Gomega) {
 			var crb rbacv1.ClusterRoleBinding
-			err := k8sClient.Get(ctx, types.NamespacedName{Name: "default-app1-clusterrole-my-cluster-role"}, &crb)
+			err := k8sClient.Get(ctx, mkName("", "default-app1-clusterrole-my-cluster-role"), &crb)
 			g.Expect(err).NotTo(HaveOccurred())
 
 			g.Expect(crb.Subjects).To(ContainElement(rbacv1.Subject{
@@ -133,7 +127,7 @@ var _ = Describe("Application controller", func() {
 		By("Creating role bindings for ClusterRoles")
 		Eventually(func(g Gomega) {
 			var rb rbacv1.RoleBinding
-			err := k8sClient.Get(ctx, types.NamespacedName{Name: "app1-clusterrole-my-cluster-role-for-namespace", Namespace: app.Namespace}, &rb)
+			err := k8sClient.Get(ctx, mkName(app.Namespace, "app1-clusterrole-my-cluster-role-for-namespace"), &rb)
 			g.Expect(err).NotTo(HaveOccurred())
 
 			g.Expect(rb.Subjects).To(ContainElement(rbacv1.Subject{
@@ -153,7 +147,7 @@ var _ = Describe("Application controller", func() {
 		By("Creating role bindings for Roles")
 		Eventually(func(g Gomega) {
 			var rb rbacv1.RoleBinding
-			err := k8sClient.Get(ctx, types.NamespacedName{Name: "app1-role-my-role", Namespace: app.Namespace}, &rb)
+			err := k8sClient.Get(ctx, mkName(app.Namespace, "app1-role-my-role"), &rb)
 			g.Expect(err).NotTo(HaveOccurred())
 
 			g.Expect(rb.Subjects).To(ContainElement(rbacv1.Subject{
@@ -173,7 +167,7 @@ var _ = Describe("Application controller", func() {
 		By("Creating a deployment")
 		Eventually(func(g Gomega) {
 			var deploy appsv1.Deployment
-			err := k8sClient.Get(ctx, types.NamespacedName{Name: app.Name, Namespace: app.Namespace}, &deploy)
+			err := k8sClient.Get(ctx, mkName(app.Namespace, app.Name), &deploy)
 			g.Expect(err).NotTo(HaveOccurred())
 
 			g.Expect(deploy.Spec.Template.Spec.ServiceAccountName).To(Equal(serviceAccountName.Name))
@@ -186,7 +180,7 @@ var _ = Describe("Application controller", func() {
 		}).WithContext(ctx).Should(Succeed())
 
 		By("Creating a service")
-		serviceName := types.NamespacedName{Name: app.Name, Namespace: app.Namespace}
+		serviceName := mkName(app.Namespace, app.Name)
 		Eventually(func(g Gomega) {
 			var service corev1.Service
 			err := k8sClient.Get(ctx, serviceName, &service)
@@ -210,7 +204,7 @@ var _ = Describe("Application controller", func() {
 		By("Creating an Ingress")
 		Eventually(func(g Gomega) {
 			var ingress networkingv1.Ingress
-			err := k8sClient.Get(ctx, types.NamespacedName{Name: app.Name, Namespace: app.Namespace}, &ingress)
+			err := k8sClient.Get(ctx, mkName(app.Namespace, app.Name), &ingress)
 			g.Expect(err).NotTo(HaveOccurred())
 
 			g.Expect(*ingress.Spec.IngressClassName).To(Equal("traefik"))
@@ -248,10 +242,7 @@ var _ = Describe("Application controller", func() {
 		app := makeApp("app2", imageRef)
 		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
 
-		deployName := types.NamespacedName{
-			Name:      app.Name,
-			Namespace: app.Namespace,
-		}
+		deployName := mkName(app.Namespace, app.Name)
 		var deploy appsv1.Deployment
 
 		By("Creating a deployment with the current image")
@@ -290,7 +281,7 @@ var _ = Describe("Application controller", func() {
 		By("Creating an Ingress")
 		Eventually(func(g Gomega) {
 			var ingress networkingv1.Ingress
-			err := k8sClient.Get(ctx, types.NamespacedName{Name: app.Name, Namespace: app.Namespace}, &ingress)
+			err := k8sClient.Get(ctx, mkName(app.Namespace, app.Name), &ingress)
 			g.Expect(err).NotTo(HaveOccurred())
 
 			g.Expect(*ingress.Spec.IngressClassName).To(Equal("nginx-private"))
@@ -302,27 +293,17 @@ var _ = Describe("Application controller", func() {
 		imageRef := registry.MustUpsertTag("app4", "latest")
 		app := makeApp("app4", imageRef)
 
-		crbName := types.NamespacedName{
-			Name: "default-app4-clusterrole-my-cluster-role",
-		}
+		crbName := mkName("", "default-app4-clusterrole-my-cluster-role")
 		var crb rbacv1.ClusterRoleBinding
 
 		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
 
-		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, crbName, &crb)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).WithContext(ctx).Should(Succeed())
+		EventuallyGetObject(ctx, crbName, &crb)
 
 		By("Deleting the CluseterRoleBinding objects")
 		Expect(k8sClient.Delete(ctx, &app)).Should(Succeed())
 
-		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, crbName, &crb)
-			g.Expect(errors.IsNotFound(err)).To(BeTrue())
-
-		}).WithContext(ctx).Should(Succeed())
-
+		EventuallyNotFindObject(ctx, crbName, &crb)
 	}, SpecTimeout(5*time.Second))
 
 	It("Should update the deployment when container configuration changes", func(ctx SpecContext) {
@@ -330,30 +311,21 @@ var _ = Describe("Application controller", func() {
 		app := makeApp("app5", imageRef)
 		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
 
-		deployName := types.NamespacedName{Name: app.Name, Namespace: app.Namespace}
+		deployName := mkName(app.Namespace, app.Name)
 		var deploy appsv1.Deployment
 
 		By("Creating a deployment")
-		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, deployName, &deploy)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).WithContext(ctx).Should(Succeed())
+		EventuallyGetObject(ctx, deployName, &deploy)
 
 		By("Updating the Application")
-		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-			err := k8sClient.Get(ctx, types.NamespacedName{Name: app.Name, Namespace: app.Namespace}, &app)
-			if err != nil {
-				return err
-			}
+		EventuallyUpdateApp(ctx, &app, func() {
 			app.Spec.Env = []corev1.EnvVar{
 				{
 					Name:  "MY_ENV_VAR",
 					Value: "FOO",
 				},
 			}
-			return k8sClient.Update(ctx, &app)
 		})
-		Expect(err).NotTo(HaveOccurred())
 
 		By("Eventually updating the deployment")
 		Eventually(func(g Gomega) {
@@ -374,50 +346,26 @@ var _ = Describe("Application controller", func() {
 
 		var rb, rbClusterRole rbacv1.RoleBinding
 		var crb rbacv1.ClusterRoleBinding
-		rbName := types.NamespacedName{Name: "app6-role-my-role", Namespace: app.Namespace}
-		rbClusterRoleName := types.NamespacedName{Name: "app6-clusterrole-my-cluster-role-for-namespace", Namespace: app.Namespace}
-		crbName := types.NamespacedName{Name: "default-app6-clusterrole-my-cluster-role"}
+		rbName := mkName(app.Namespace, "app6-role-my-role")
+		rbClusterRoleName := mkName(app.Namespace, "app6-clusterrole-my-cluster-role-for-namespace")
+		crbName := mkName("", "default-app6-clusterrole-my-cluster-role")
+		appName := mkName(app.Namespace, app.Name)
 
 		By("Creating the role bindings")
-		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, rbName, &rb)
-			g.Expect(err).NotTo(HaveOccurred())
-
-			err = k8sClient.Get(ctx, rbClusterRoleName, &rbClusterRole)
-			g.Expect(err).NotTo(HaveOccurred())
-
-			err = k8sClient.Get(ctx, crbName, &crb)
-			g.Expect(err).NotTo(HaveOccurred())
-
-			err = k8sClient.Get(ctx, types.NamespacedName{Namespace: app.Namespace, Name: app.Name}, &app)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).WithContext(ctx).Should(Succeed())
+		EventuallyGetObject(ctx, rbName, &rb)
+		EventuallyGetObject(ctx, rbClusterRoleName, &rbClusterRole)
+		EventuallyGetObject(ctx, crbName, &crb)
+		EventuallyGetObject(ctx, appName, &app)
 
 		By("Updating the Application")
-		err := retry.RetryOnConflict(retry.DefaultBackoff, func() error {
-			err := k8sClient.Get(ctx, types.NamespacedName{Namespace: app.Namespace, Name: app.Name}, &app)
-			if err != nil {
-				return err
-			}
+		EventuallyUpdateApp(ctx, &app, func() {
 			app.Spec.Roles = []yarotskymev1alpha1.ScopedRoleRef{}
-			return k8sClient.Update(ctx, &app)
 		})
-		Expect(err).NotTo(HaveOccurred())
 
 		By("Eventually removing the role bindings")
-		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, rbName, &rb)
-			g.Expect(errors.IsNotFound(err)).To(BeTrue())
-
-			err = k8sClient.Get(ctx, rbClusterRoleName, &rbClusterRole)
-			g.Expect(errors.IsNotFound(err)).To(BeTrue())
-
-			err = k8sClient.Get(ctx, crbName, &crb)
-			g.Expect(errors.IsNotFound(err)).To(BeTrue())
-
-			err = k8sClient.Get(ctx, types.NamespacedName{Namespace: app.Namespace, Name: app.Name}, &app)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).WithContext(ctx).Should(Succeed())
+		EventuallyNotFindObject(ctx, rbName, &rb)
+		EventuallyNotFindObject(ctx, rbClusterRoleName, &rbClusterRole)
+		EventuallyNotFindObject(ctx, crbName, &crb)
 	}, SpecTimeout(5*time.Second))
 
 	It("Should backfill missing RoleBindings and ClusterRoleBindings", func(ctx SpecContext) {
@@ -427,51 +375,35 @@ var _ = Describe("Application controller", func() {
 
 		var rb, rbClusterRole rbacv1.RoleBinding
 		var crb rbacv1.ClusterRoleBinding
-		rbName := types.NamespacedName{Name: "app7-role-my-role", Namespace: app.Namespace}
-		rbClusterRoleName := types.NamespacedName{Name: "app7-clusterrole-my-cluster-role-for-namespace", Namespace: app.Namespace}
-		crbName := types.NamespacedName{Name: "default-app7-clusterrole-my-cluster-role"}
+		rbName := mkName(app.Namespace, "app7-role-my-role")
+		rbClusterRoleName := mkName(app.Namespace, "app7-clusterrole-my-cluster-role-for-namespace")
+		crbName := mkName("", "default-app7-clusterrole-my-cluster-role")
 
 		By("Creating the role bindings")
-		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, rbName, &rb)
-			g.Expect(err).NotTo(HaveOccurred())
-
-			err = k8sClient.Get(ctx, rbClusterRoleName, &rbClusterRole)
-			g.Expect(err).NotTo(HaveOccurred())
-
-			err = k8sClient.Get(ctx, crbName, &crb)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).WithContext(ctx).Should(Succeed())
+		EventuallyGetObject(ctx, rbName, &rb)
+		EventuallyGetObject(ctx, rbClusterRoleName, &rbClusterRole)
+		EventuallyGetObject(ctx, crbName, &crb)
 
 		By("Manually deleting a RoleBinding")
 		err := k8sClient.Delete(ctx, &rb)
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Eventually backfilling the RoleBinding")
-		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, rbName, &rb)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).WithContext(ctx).Should(Succeed())
+		EventuallyGetObject(ctx, rbName, &rb)
 
 		By("Manually deleting a RoleBinding for a ClusterRole")
 		err = k8sClient.Delete(ctx, &rbClusterRole)
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Eventually backfilling the RoleBinding for a ClusterRole")
-		Eventually(func(g Gomega) {
-			err = k8sClient.Get(ctx, rbClusterRoleName, &rbClusterRole)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).WithContext(ctx).Should(Succeed())
+		EventuallyGetObject(ctx, rbClusterRoleName, &rbClusterRole)
 
 		By("Manually deleting a ClusterRoleBinding")
 		err = k8sClient.Delete(ctx, &crb)
 		Expect(err).NotTo(HaveOccurred())
 
 		By("Eventually backfilling the ClusterRoleBinding")
-		Eventually(func(g Gomega) {
-			err = k8sClient.Get(ctx, crbName, &crb)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).WithContext(ctx).Should(Succeed())
+		EventuallyGetObject(ctx, crbName, &crb)
 	}, SpecTimeout(5*time.Second))
 
 	It("Should set status conditions", func(ctx SpecContext) {
@@ -479,90 +411,85 @@ var _ = Describe("Application controller", func() {
 		app := makeApp("app8", imageRef)
 		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
 
-		appName := types.NamespacedName{Namespace: app.Namespace, Name: app.Name}
 		By("Setting the conditions after creation")
-		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, appName, &app)
-			g.Expect(err).NotTo(HaveOccurred())
-
-			g.Expect(app.Status.Conditions).To(ContainElement(
-				SatisfyAll(
-					HaveField("Type", "Ready"),
-					HaveField("Status", metav1.ConditionUnknown),
-					HaveField("Reason", "Reconciling"),
-				),
-			))
-		}).WithContext(ctx).Should(Succeed())
+		EventuallyHaveCondition(ctx, &app, "Ready", metav1.ConditionUnknown, "Reconciling")
 
 		By("An issue creating an Ingress")
-		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, appName, &app)
-			g.Expect(err).NotTo(HaveOccurred())
-
+		EventuallyUpdateApp(ctx, &app, func() {
 			app.Spec.Ingress.Host = "---"
-			err = k8sClient.Update(ctx, &app)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).WithContext(ctx).Should(Succeed())
+		})
 
 		By("Setting the Ready status condition to False")
-		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, appName, &app)
-			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(app.Status.Conditions).To(ContainElement(
-				SatisfyAll(
-					HaveField("Type", "Ready"),
-					HaveField("Status", metav1.ConditionFalse),
-					HaveField("Reason", "UpsertIngressError"),
-				),
-			))
-		}).WithContext(ctx).Should(Succeed())
+		EventuallyHaveCondition(ctx, &app, "Ready", metav1.ConditionFalse, "UpsertIngressError")
 
 		By("Fixing the ingress")
-		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, appName, &app)
-			g.Expect(err).NotTo(HaveOccurred())
-
+		EventuallyUpdateApp(ctx, &app, func() {
 			app.Spec.Ingress.Host = "foo.example.com"
-			err = k8sClient.Update(ctx, &app)
-			g.Expect(err).NotTo(HaveOccurred())
-		}).WithContext(ctx).Should(Succeed())
+		})
 
 		By("Deployment becoming Available")
-		deployName := types.NamespacedName{Namespace: app.Namespace, Name: app.Name}
-		SetDeploymentStatus(ctx, deployName, true, "MinimumReplicasAvailable")
+		deployName := mkName(app.Namespace, app.Name)
+		SetDeploymentAvailableStatus(ctx, deployName, true, "MinimumReplicasAvailable")
 
 		By("Setting the Ready status condition to True")
-		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, appName, &app)
-			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(app.Status.Conditions).To(ContainElement(
-				SatisfyAll(
-					HaveField("Type", "Ready"),
-					HaveField("Status", metav1.ConditionTrue),
-					HaveField("Reason", "MinimumReplicasAvailable"),
-				),
-			))
-		}).WithContext(ctx).Should(Succeed())
+		EventuallyHaveCondition(ctx, &app, "Ready", metav1.ConditionTrue, "MinimumReplicasAvailable")
 
 		By("Deployment becoming unavailable")
-		SetDeploymentStatus(ctx, deployName, false, "MinimumReplicasUnavailable")
+		SetDeploymentAvailableStatus(ctx, deployName, false, "MinimumReplicasUnavailable")
 
 		By("Setting the Ready status condition to False")
-		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, appName, &app)
-			g.Expect(err).NotTo(HaveOccurred())
-			g.Expect(app.Status.Conditions).To(ContainElement(
-				SatisfyAll(
-					HaveField("Type", "Ready"),
-					HaveField("Status", metav1.ConditionFalse),
-					HaveField("Reason", "MinimumReplicasUnavailable"),
-				),
-			))
-		}).WithContext(ctx).Should(Succeed())
+		EventuallyHaveCondition(ctx, &app, "Ready", metav1.ConditionFalse, "MinimumReplicasUnavailable")
 	}, SpecTimeout(5*time.Second))
 })
 
-func SetDeploymentStatus(ctx context.Context, deployName types.NamespacedName, available bool, reason string) {
+func EventuallyGetObject(ctx context.Context, name types.NamespacedName, obj client.Object) {
+	GinkgoHelper()
+
+	Eventually(func(g Gomega) {
+		err := k8sClient.Get(ctx, name, obj)
+		g.Expect(err).NotTo(HaveOccurred())
+	}).WithContext(ctx).Should(Succeed())
+}
+
+func EventuallyNotFindObject(ctx context.Context, name types.NamespacedName, obj client.Object) {
+	GinkgoHelper()
+
+	Eventually(func(g Gomega) {
+		err := k8sClient.Get(ctx, name, obj)
+		g.Expect(errors.IsNotFound(err)).To(BeTrue())
+	}).WithContext(ctx).Should(Succeed())
+}
+
+func EventuallyHaveCondition(ctx context.Context, app *yarotskymev1alpha1.Application, name string, status metav1.ConditionStatus, reason string) {
+	GinkgoHelper()
+
+	Eventually(func(g Gomega) {
+		err := k8sClient.Get(ctx, mkName(app.Namespace, app.Name), app)
+		g.Expect(err).NotTo(HaveOccurred())
+		g.Expect(app.Status.Conditions).To(ContainElement(
+			SatisfyAll(
+				HaveField("Type", name),
+				HaveField("Status", status),
+				HaveField("Reason", reason),
+			),
+		))
+	}).WithContext(ctx).Should(Succeed())
+}
+
+func EventuallyUpdateApp(ctx context.Context, app *yarotskymev1alpha1.Application, mutateFn func()) {
+	GinkgoHelper()
+
+	Eventually(func(g Gomega) {
+		err := k8sClient.Get(ctx, mkName(app.Namespace, app.Name), app)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		mutateFn()
+		err = k8sClient.Update(ctx, app)
+		g.Expect(err).NotTo(HaveOccurred())
+	}).WithContext(ctx).Should(Succeed())
+}
+
+func SetDeploymentAvailableStatus(ctx context.Context, deployName types.NamespacedName, available bool, reason string) {
 	GinkgoHelper()
 
 	var status corev1.ConditionStatus
@@ -587,4 +514,11 @@ func SetDeploymentStatus(ctx context.Context, deployName types.NamespacedName, a
 		err = k8sClient.Status().Update(ctx, &deploy)
 		g.Expect(err).NotTo(HaveOccurred())
 	}).WithContext(ctx).Should(Succeed())
+}
+
+func mkName(namespace, name string) types.NamespacedName {
+	return types.NamespacedName{
+		Namespace: namespace,
+		Name:      name,
+	}
 }
