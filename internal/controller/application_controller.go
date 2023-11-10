@@ -39,6 +39,7 @@ import (
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
 	"git.home.yarotsky.me/vlad/application-controller/internal/gkutil"
 	"git.home.yarotsky.me/vlad/application-controller/internal/images"
+	"git.home.yarotsky.me/vlad/application-controller/internal/k8s"
 	osdkHandler "github.com/operator-framework/operator-lib/handler"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -165,16 +166,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	} else {
 		conditions := []metav1.Condition{}
-		deployConditions := make([]metav1.Condition, 0, len(deploy.Status.Conditions))
-		for _, c := range deploy.Status.Conditions {
-			deployConditions = append(deployConditions, metav1.Condition{
-				Type:               string(c.Type),
-				Status:             metav1.ConditionStatus(c.Status),
-				Reason:             c.Reason,
-				Message:            c.Message,
-				LastTransitionTime: c.LastTransitionTime,
-			})
-		}
+		deployConditions := k8s.ConvertDeploymentConditionsToStandardForm(deploy.Status.Conditions)
 
 		if c := meta.FindStatusCondition(deployConditions, string(appsv1.DeploymentAvailable)); c != nil {
 			meta.SetStatusCondition(&conditions, metav1.Condition{Type: yarotskymev1alpha1.ConditionReady, Status: c.Status, Reason: c.Reason, Message: c.Message})
