@@ -237,8 +237,13 @@ type Metrics struct {
 	PortName string `json:"portName,omitempty"`
 }
 
+const (
+	ConditionReady = "Ready"
+)
+
 // ApplicationStatus defines the observed state of Application
 type ApplicationStatus struct {
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 }
 
 //+kubebuilder:object:root=true

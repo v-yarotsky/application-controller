@@ -20,7 +20,9 @@ import (
 	"context"
 	"fmt"
 
+	"go.uber.org/multierr"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -92,6 +94,12 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	namer := &simpleNamer{&app}
 
+	if len(app.Status.Conditions) == 0 {
+		r.setConditions(ctx, &app,
+			metav1.Condition{Type: yarotskymev1alpha1.ConditionReady, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"},
+		)
+	}
+
 	if app.DeletionTimestamp.IsZero() {
 		if !controllerutil.ContainsFinalizer(&app, FinalizerName) {
 			controllerutil.AddFinalizer(&app, FinalizerName)
@@ -142,11 +150,6 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	if err := r.ensureDeployment(ctx, &app, namer); err != nil {
-		log.Error(err, "failed to ensure a Deployment exists for the Application")
-		return ctrl.Result{}, err
-	}
-
 	if err := r.ensureService(ctx, &app, namer); err != nil {
 		log.Error(err, "failed to ensure a Service exists for the Application")
 		return ctrl.Result{}, err
@@ -157,11 +160,35 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	log.Info("Application is up to date.")
-	return ctrl.Result{}, nil
+	if deploy, err := r.ensureDeployment(ctx, &app, namer); err != nil {
+		log.Error(err, "failed to ensure a Deployment exists for the Application")
+		return ctrl.Result{}, err
+	} else {
+		conditions := []metav1.Condition{}
+		deployConditions := make([]metav1.Condition, 0, len(deploy.Status.Conditions))
+		for _, c := range deploy.Status.Conditions {
+			deployConditions = append(deployConditions, metav1.Condition{
+				Type:               string(c.Type),
+				Status:             metav1.ConditionStatus(c.Status),
+				Reason:             c.Reason,
+				Message:            c.Message,
+				LastTransitionTime: c.LastTransitionTime,
+			})
+		}
+
+		if c := meta.FindStatusCondition(deployConditions, string(appsv1.DeploymentAvailable)); c != nil {
+			meta.SetStatusCondition(&conditions, metav1.Condition{Type: yarotskymev1alpha1.ConditionReady, Status: c.Status, Reason: c.Reason, Message: c.Message})
+		}
+
+		err := r.setConditions(ctx, &app, conditions...)
+		if err == nil {
+			log.Info("Application is up to date.")
+		}
+		return ctrl.Result{}, err
+	}
 }
 
-func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) (*appsv1.Deployment, error) {
 	name := namer.DeploymentName()
 	log := log.FromContext(ctx).WithValues("deploymentname", name.String())
 
@@ -174,8 +201,8 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 
 	imgRef, err := r.ImageFinder.FindImage(ctx, app.Spec.Image)
 	if err != nil {
-		log.Error(err, "failed to set controller reference on Deployment")
-		return err
+		log.Error(err, "failed to find the latest version of the image")
+		return nil, err
 	}
 
 	result, err := controllerutil.CreateOrPatch(ctx, r.Client, &deploy, func() error {
@@ -222,7 +249,13 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 	})
 	if err != nil {
 		log.Error(err, "failed to create/update the Deployment")
-		return err
+		statusErr := r.setConditions(ctx, app, metav1.Condition{
+			Type:    yarotskymev1alpha1.ConditionReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  "UpsertDeploymentFailed",
+			Message: fmt.Sprintf("Failed to upsert a Deployment: %s", err.Error()),
+		})
+		return nil, multierr.Combine(err, statusErr)
 	}
 
 	switch result {
@@ -231,7 +264,8 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 	case controllerutil.OperationResultUpdated:
 		log.Info("Updated Deployment")
 	}
-	return nil
+
+	return &deploy, nil
 }
 
 func (r *ApplicationReconciler) ensureServiceAccount(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
@@ -255,7 +289,13 @@ func (r *ApplicationReconciler) ensureServiceAccount(ctx context.Context, app *y
 	})
 	if err != nil {
 		log.Error(err, "failed to create/update the ServiceACcount")
-		return err
+		statusErr := r.setConditions(ctx, app, metav1.Condition{
+			Type:    yarotskymev1alpha1.ConditionReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  "UpsertServiceAccountFailed",
+			Message: fmt.Sprintf("Failed to upsert a ServiceAccount: %s", err.Error()),
+		})
+		return multierr.Combine(err, statusErr)
 	}
 
 	switch result {
@@ -324,7 +364,13 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 		})
 		if err != nil {
 			log.Error(err, "failed to create/update RoleBinding")
-			return err
+			statusErr := r.setConditions(ctx, app, metav1.Condition{
+				Type:    yarotskymev1alpha1.ConditionReady,
+				Status:  metav1.ConditionFalse,
+				Reason:  "UpsertRoleBindingError",
+				Message: fmt.Sprintf("Failed to upsert a RoleBinding: %s", err.Error()),
+			})
+			return multierr.Combine(err, statusErr)
 		}
 
 		switch result {
@@ -412,7 +458,13 @@ func (r *ApplicationReconciler) ensureClusterRoleBindings(ctx context.Context, a
 		})
 		if err != nil {
 			log.Error(err, "failed to create/update a ClusterRoleBinding")
-			return err
+			statusErr := r.setConditions(ctx, app, metav1.Condition{
+				Type:    yarotskymev1alpha1.ConditionReady,
+				Status:  metav1.ConditionFalse,
+				Reason:  "UpsertClusterRoleBindingError",
+				Message: fmt.Sprintf("Failed to upsert a ClusterRoleBinding: %s", err.Error()),
+			})
+			return multierr.Combine(err, statusErr)
 		}
 
 		switch result {
@@ -475,14 +527,20 @@ func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotsky
 
 	if err != nil {
 		log.Error(err, "failed to create/update the Service")
-		return err
+		statusErr := r.setConditions(ctx, app, metav1.Condition{
+			Type:    yarotskymev1alpha1.ConditionReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  "UpsertServiceError",
+			Message: fmt.Sprintf("Failed to upsert a Service: %s", err.Error()),
+		})
+		return multierr.Combine(err, statusErr)
 	}
 
 	switch result {
 	case controllerutil.OperationResultCreated:
-		log.Info("Service Deployment")
+		log.Info("Created Service")
 	case controllerutil.OperationResultUpdated:
-		log.Info("Service Deployment")
+		log.Info("Updated Service")
 	}
 	return nil
 }
@@ -561,7 +619,13 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 
 	if err != nil {
 		log.Error(err, "failed to create/update the Ingress")
-		return err
+		statusErr := r.setConditions(ctx, app, metav1.Condition{
+			Type:    yarotskymev1alpha1.ConditionReady,
+			Status:  metav1.ConditionFalse,
+			Reason:  "UpsertIngressError",
+			Message: fmt.Sprintf("Failed to upsert an Ingress: %s", err.Error()),
+		})
+		return multierr.Combine(err, statusErr)
 	}
 
 	switch result {
@@ -675,4 +739,22 @@ func (r *ApplicationReconciler) setupClusterRoleBindingIndex(indexer client.Fiel
 func (r *ApplicationReconciler) gk() schema.GroupKind {
 	gvk, _ := apiutil.GVKForObject(&yarotskymev1alpha1.Application{}, r.Scheme)
 	return gvk.GroupKind()
+}
+
+func (r *ApplicationReconciler) setConditions(ctx context.Context, app *yarotskymev1alpha1.Application, conditions ...metav1.Condition) error {
+	if len(conditions) == 0 {
+		return nil
+	}
+
+	log := log.FromContext(ctx)
+	log.Info("Setting conditions", "conditions", conditions)
+
+	for _, c := range conditions {
+		meta.SetStatusCondition(&app.Status.Conditions, c)
+	}
+	if err := r.Status().Update(ctx, app); err != nil {
+		log.Error(err, "Failed to update Application status")
+		return err
+	}
+	return nil
 }

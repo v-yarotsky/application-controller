@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -472,4 +473,118 @@ var _ = Describe("Application controller", func() {
 			g.Expect(err).NotTo(HaveOccurred())
 		}).WithContext(ctx).Should(Succeed())
 	}, SpecTimeout(5*time.Second))
+
+	It("Should set status conditions", func(ctx SpecContext) {
+		imageRef := registry.MustUpsertTag("app8", "latest")
+		app := makeApp("app8", imageRef)
+		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+
+		appName := types.NamespacedName{Namespace: app.Namespace, Name: app.Name}
+		By("Setting the conditions after creation")
+		Eventually(func(g Gomega) {
+			err := k8sClient.Get(ctx, appName, &app)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			g.Expect(app.Status.Conditions).To(ContainElement(
+				SatisfyAll(
+					HaveField("Type", "Ready"),
+					HaveField("Status", metav1.ConditionUnknown),
+					HaveField("Reason", "Reconciling"),
+				),
+			))
+		}).WithContext(ctx).Should(Succeed())
+
+		By("An issue creating an Ingress")
+		Eventually(func(g Gomega) {
+			err := k8sClient.Get(ctx, appName, &app)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			app.Spec.Ingress.Host = "---"
+			err = k8sClient.Update(ctx, &app)
+			g.Expect(err).NotTo(HaveOccurred())
+		}).WithContext(ctx).Should(Succeed())
+
+		By("Setting the Ready status condition to False")
+		Eventually(func(g Gomega) {
+			err := k8sClient.Get(ctx, appName, &app)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(app.Status.Conditions).To(ContainElement(
+				SatisfyAll(
+					HaveField("Type", "Ready"),
+					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Reason", "UpsertIngressError"),
+				),
+			))
+		}).WithContext(ctx).Should(Succeed())
+
+		By("Fixing the ingress")
+		Eventually(func(g Gomega) {
+			err := k8sClient.Get(ctx, appName, &app)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			app.Spec.Ingress.Host = "foo.example.com"
+			err = k8sClient.Update(ctx, &app)
+			g.Expect(err).NotTo(HaveOccurred())
+		}).WithContext(ctx).Should(Succeed())
+
+		By("Deployment becoming Available")
+		deployName := types.NamespacedName{Namespace: app.Namespace, Name: app.Name}
+		SetDeploymentStatus(ctx, deployName, true, "MinimumReplicasAvailable")
+
+		By("Setting the Ready status condition to True")
+		Eventually(func(g Gomega) {
+			err := k8sClient.Get(ctx, appName, &app)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(app.Status.Conditions).To(ContainElement(
+				SatisfyAll(
+					HaveField("Type", "Ready"),
+					HaveField("Status", metav1.ConditionTrue),
+					HaveField("Reason", "MinimumReplicasAvailable"),
+				),
+			))
+		}).WithContext(ctx).Should(Succeed())
+
+		By("Deployment becoming unavailable")
+		SetDeploymentStatus(ctx, deployName, false, "MinimumReplicasUnavailable")
+
+		By("Setting the Ready status condition to False")
+		Eventually(func(g Gomega) {
+			err := k8sClient.Get(ctx, appName, &app)
+			g.Expect(err).NotTo(HaveOccurred())
+			g.Expect(app.Status.Conditions).To(ContainElement(
+				SatisfyAll(
+					HaveField("Type", "Ready"),
+					HaveField("Status", metav1.ConditionFalse),
+					HaveField("Reason", "MinimumReplicasUnavailable"),
+				),
+			))
+		}).WithContext(ctx).Should(Succeed())
+	}, SpecTimeout(5*time.Second))
 })
+
+func SetDeploymentStatus(ctx context.Context, deployName types.NamespacedName, available bool, reason string) {
+	GinkgoHelper()
+
+	var status corev1.ConditionStatus
+	if available {
+		status = corev1.ConditionTrue
+	} else {
+		status = corev1.ConditionFalse
+	}
+
+	Eventually(func(g Gomega) {
+		var deploy appsv1.Deployment
+		err := k8sClient.Get(ctx, deployName, &deploy)
+		g.Expect(err).NotTo(HaveOccurred())
+
+		deploy.Status.Conditions = []appsv1.DeploymentCondition{
+			{
+				Type:   appsv1.DeploymentAvailable,
+				Status: status,
+				Reason: reason,
+			},
+		}
+		err = k8sClient.Status().Update(ctx, &deploy)
+		g.Expect(err).NotTo(HaveOccurred())
+	}).WithContext(ctx).Should(Succeed())
+}
