@@ -134,10 +134,9 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	namer := &simpleNamer{&app}
 
 	if len(app.Status.Conditions) == 0 {
-		r.updateStatus(ctx, &app,
-			metav1.Condition{Type: yarotskymev1alpha1.ConditionReady, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"},
-		)
-		return ctrl.Result{}, nil
+		r.setConditions(&app, metav1.Condition{Type: yarotskymev1alpha1.ConditionReady, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"})
+		err := r.updateStatus(ctx, &app)
+		return ctrl.Result{}, err
 	}
 
 	if app.DeletionTimestamp.IsZero() {
@@ -156,21 +155,17 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			log.Info("Cleaning up ClusterRoleBindings")
 			r.Recorder.Eventf(&app, corev1.EventTypeNormal, EventReasonCleanup, "Removing ClusterRoleBindings, if any")
 
-			done, err := r.ensureNoClusterRoleBindings(ctx, &app, namer)
+			err := r.ensureNoClusterRoleBindings(ctx, &app, namer)
 			if err != nil {
 				log.Error(err, "failed to clean up ClusterRoleBindings")
 				return ctrl.Result{}, err
 			}
 
-			// Only remove finalizer after all the ClusterRoleBinding objects have been removed
-			// to avoid a racing reconcile calls triggered by deleted ClusterRoleBindings.
-			if done {
-				log.Info("Removing finalizer")
-				controllerutil.RemoveFinalizer(&app, FinalizerName)
-				if err := r.Update(ctx, &app); err != nil {
-					log.Error(err, "failed to remove finalizer")
-					return ctrl.Result{}, err
-				}
+			log.Info("Removing finalizer")
+			controllerutil.RemoveFinalizer(&app, FinalizerName)
+			if err := r.Update(ctx, &app); err != nil {
+				log.Error(err, "failed to remove finalizer")
+				return ctrl.Result{}, err
 			}
 		}
 		// we are in the process of deletion
@@ -206,14 +201,13 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		log.Error(err, "failed to ensure a Deployment exists for the Application")
 		return ctrl.Result{}, err
 	} else {
-		conditions := []metav1.Condition{}
 		deployConditions := k8s.ConvertDeploymentConditionsToStandardForm(deploy.Status.Conditions)
 
 		if c := meta.FindStatusCondition(deployConditions, string(appsv1.DeploymentAvailable)); c != nil {
-			meta.SetStatusCondition(&conditions, metav1.Condition{Type: yarotskymev1alpha1.ConditionReady, Status: c.Status, Reason: c.Reason, Message: c.Message})
+			r.setConditions(&app, metav1.Condition{Type: yarotskymev1alpha1.ConditionReady, Status: c.Status, Reason: c.Reason, Message: c.Message})
 		}
 
-		err := r.updateStatus(ctx, &app, conditions...)
+		err := r.updateStatus(ctx, &app)
 		if err == nil {
 			log.Info("Application is up to date.")
 		}
@@ -302,12 +296,13 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 	if err != nil {
 		log.Error(err, "failed to create/update the Deployment")
 		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventDeploymentUpsertFailed, "Could not upsert Deployment %s: %s", name, err)
-		statusErr := r.updateStatus(ctx, app, metav1.Condition{
+		r.setConditions(app, metav1.Condition{
 			Type:    yarotskymev1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
 			Reason:  EventDeploymentUpsertFailed,
 			Message: fmt.Sprintf("Failed to upsert a Deployment: %s", err.Error()),
 		})
+		statusErr := r.updateStatus(ctx, app)
 		return nil, multierr.Combine(err, statusErr)
 	}
 
@@ -345,12 +340,13 @@ func (r *ApplicationReconciler) ensureServiceAccount(ctx context.Context, app *y
 	if err != nil {
 		log.Error(err, "failed to create/update the ServiceACcount")
 		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventServiceAccountUpsertFailed, "Could not upsert service account %s: %s", name, err)
-		statusErr := r.updateStatus(ctx, app, metav1.Condition{
+		r.setConditions(app, metav1.Condition{
 			Type:    yarotskymev1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
 			Reason:  EventServiceAccountUpsertFailed,
 			Message: fmt.Sprintf("Failed to upsert a ServiceAccount: %s", err.Error()),
 		})
+		statusErr := r.updateStatus(ctx, app)
 		return multierr.Combine(err, statusErr)
 	}
 
@@ -423,12 +419,13 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 		if err != nil {
 			log.Error(err, "failed to create/update RoleBinding")
 			r.Recorder.Eventf(app, corev1.EventTypeWarning, EventRoleBindingUpsertFailed, "Could not upsert RoleBinding %s: %s", name, err)
-			statusErr := r.updateStatus(ctx, app, metav1.Condition{
+			r.setConditions(app, metav1.Condition{
 				Type:    yarotskymev1alpha1.ConditionReady,
 				Status:  metav1.ConditionFalse,
 				Reason:  EventRoleBindingUpsertFailed,
 				Message: fmt.Sprintf("Failed to upsert a RoleBinding: %s", err.Error()),
 			})
+			statusErr := r.updateStatus(ctx, app)
 			return multierr.Combine(err, statusErr)
 		}
 
@@ -520,12 +517,13 @@ func (r *ApplicationReconciler) ensureClusterRoleBindings(ctx context.Context, a
 		if err != nil {
 			log.Error(err, "failed to create/update a ClusterRoleBinding")
 			r.Recorder.Eventf(app, corev1.EventTypeWarning, EventClusterRoleBindingUpsertFailed, "Could not upsert ClusterRoleBinding %s: %s", name, err)
-			statusErr := r.updateStatus(ctx, app, metav1.Condition{
+			r.setConditions(app, metav1.Condition{
 				Type:    yarotskymev1alpha1.ConditionReady,
 				Status:  metav1.ConditionFalse,
 				Reason:  EventClusterRoleBindingUpsertFailed,
 				Message: fmt.Sprintf("Failed to upsert a ClusterRoleBinding: %s", err.Error()),
 			})
+			statusErr := r.updateStatus(ctx, app)
 			return multierr.Combine(err, statusErr)
 		}
 
@@ -592,12 +590,13 @@ func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotsky
 	if err != nil {
 		log.Error(err, "failed to create/update the Service")
 		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventServiceUpsertFailed, "Could not upsert Service %s: %s", name, err)
-		statusErr := r.updateStatus(ctx, app, metav1.Condition{
+		r.setConditions(app, metav1.Condition{
 			Type:    yarotskymev1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
 			Reason:  EventServiceUpsertFailed,
 			Message: fmt.Sprintf("Failed to upsert a Service: %s", err.Error()),
 		})
+		statusErr := r.updateStatus(ctx, app)
 		return multierr.Combine(err, statusErr)
 	}
 
@@ -687,12 +686,13 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 	if err != nil {
 		log.Error(err, "failed to create/update the Ingress")
 		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventIngressUpsertFailed, "Could not upsert Ingress %s: %s", name, err)
-		statusErr := r.updateStatus(ctx, app, metav1.Condition{
+		r.setConditions(app, metav1.Condition{
 			Type:    yarotskymev1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
 			Reason:  EventIngressUpsertFailed,
 			Message: fmt.Sprintf("Failed to upsert an Ingress: %s", err.Error()),
 		})
+		statusErr := r.updateStatus(ctx, app)
 		return multierr.Combine(err, statusErr)
 	}
 
@@ -707,16 +707,16 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 	return nil
 }
 
-func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) (done bool, err error) {
+func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	log := log.FromContext(ctx)
 
 	ownedClusterRoleBindings, err := r.getOwnedClusterRoleBindings(ctx, namer)
 	if err != nil {
-		return false, err
+		return err
 	}
 
 	if len(ownedClusterRoleBindings) == 0 {
-		return true, nil
+		return nil
 	}
 
 	for _, crb := range ownedClusterRoleBindings {
@@ -727,13 +727,11 @@ func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context,
 		if err != nil {
 			log.Error(err, "failed to delete ClusterRoleBinding")
 			r.Recorder.Eventf(app, corev1.EventTypeWarning, EventDeleteClusterRoleBindingFailed, "Could not delete ClusterRoleBinding %s: %s", crb.Name, err.Error())
-			return false, err
+			return err
 		}
 	}
 
-	// Make sure we don't attempt to remove the finalizer multiple
-	// times due to reconciliacions triggered by ClusterRoleBinding deletions.
-	return false, nil
+	return nil
 }
 
 func (r *ApplicationReconciler) getOwnedClusterRoleBindings(ctx context.Context, namer Namer) ([]rbacv1.ClusterRoleBinding, error) {
@@ -819,13 +817,16 @@ func (r *ApplicationReconciler) gk() schema.GroupKind {
 	return gvk.GroupKind()
 }
 
-func (r *ApplicationReconciler) updateStatus(ctx context.Context, app *yarotskymev1alpha1.Application, conditions ...metav1.Condition) error {
-	log := log.FromContext(ctx)
-	log.Info("Updating status", "conditions", conditions)
-
+func (r *ApplicationReconciler) setConditions(app *yarotskymev1alpha1.Application, conditions ...metav1.Condition) {
 	for _, c := range conditions {
 		meta.SetStatusCondition(&app.Status.Conditions, c)
 	}
+}
+
+func (r *ApplicationReconciler) updateStatus(ctx context.Context, app *yarotskymev1alpha1.Application) error {
+	log := log.FromContext(ctx)
+	log.Info("Updating status", "status", app.Status)
+
 	if err := r.Status().Update(ctx, app); err != nil {
 		log.Error(err, "Failed to update Application status")
 		return err
