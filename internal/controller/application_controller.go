@@ -211,6 +211,12 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 		podTemplateSpec := &deploy.Spec.Template.Spec
 		podTemplateSpec.ServiceAccountName = namer.ServiceAccountName().Name
 
+		vols := make([]corev1.Volume, 0, len(app.Spec.Volumes))
+		for _, v := range app.Spec.Volumes {
+			vols = append(vols, v.Volume)
+		}
+		podTemplateSpec.Volumes = vols
+
 		var container *corev1.Container
 		if len(podTemplateSpec.Containers) == 0 {
 			podTemplateSpec.Containers = []corev1.Container{{}}
@@ -232,6 +238,15 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 		container.ReadinessProbe = app.Spec.ReadinessProbe
 		container.StartupProbe = app.Spec.StartupProbe
 		container.SecurityContext = app.Spec.SecurityContext
+
+		mounts := make([]corev1.VolumeMount, 0, len(app.Spec.Volumes))
+		for _, v := range app.Spec.Volumes {
+			mounts = append(mounts, corev1.VolumeMount{
+				Name:      v.Name,
+				MountPath: v.MountPath,
+			})
+		}
+		container.VolumeMounts = mounts
 
 		if err := controllerutil.SetControllerReference(app, &deploy, r.Scheme); err != nil {
 			log.Error(err, "failed to set controller reference on Deployment")

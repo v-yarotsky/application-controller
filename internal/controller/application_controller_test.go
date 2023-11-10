@@ -81,6 +81,19 @@ var _ = Describe("Application controller", func() {
 						},
 					},
 				},
+				Volumes: []yarotskymev1alpha1.Volume{
+					{
+						Volume: corev1.Volume{
+							Name: "data",
+							VolumeSource: corev1.VolumeSource{
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: "data",
+								},
+							},
+						},
+						MountPath: "/data",
+					},
+				},
 			},
 		}
 	}
@@ -171,12 +184,23 @@ var _ = Describe("Application controller", func() {
 			g.Expect(err).NotTo(HaveOccurred())
 
 			g.Expect(deploy.Spec.Template.Spec.ServiceAccountName).To(Equal(serviceAccountName.Name))
+			g.Expect(deploy.Spec.Template.Spec.Volumes).To(ContainElement(
+				SatisfyAll(
+					HaveField("Name", "data"),
+					HaveField("VolumeSource.PersistentVolumeClaim.ClaimName", "data"),
+				),
+			))
+
 			g.Expect(deploy.Spec.Template.Spec.Containers).To(HaveLen(1))
 
 			mainContainer := deploy.Spec.Template.Spec.Containers[0]
 			g.Expect(mainContainer.Image).To(Equal(imageRef.String()))
 			g.Expect(mainContainer.Ports).To(HaveLen(1))
 			g.Expect(mainContainer.Ports).To(ContainElement(corev1.ContainerPort{ContainerPort: 8080, Name: "http", Protocol: corev1.ProtocolTCP}))
+			g.Expect(mainContainer.VolumeMounts).To(ContainElement(corev1.VolumeMount{
+				Name:      "data",
+				MountPath: "/data",
+			}))
 		}).WithContext(ctx).Should(Succeed())
 
 		By("Creating a service")
