@@ -134,9 +134,10 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	namer := &simpleNamer{&app}
 
 	if len(app.Status.Conditions) == 0 {
-		r.setConditions(ctx, &app,
+		r.updateStatus(ctx, &app,
 			metav1.Condition{Type: yarotskymev1alpha1.ConditionReady, Status: metav1.ConditionUnknown, Reason: "Reconciling", Message: "Starting reconciliation"},
 		)
+		return ctrl.Result{}, nil
 	}
 
 	if app.DeletionTimestamp.IsZero() {
@@ -212,7 +213,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			meta.SetStatusCondition(&conditions, metav1.Condition{Type: yarotskymev1alpha1.ConditionReady, Status: c.Status, Reason: c.Reason, Message: c.Message})
 		}
 
-		err := r.setConditions(ctx, &app, conditions...)
+		err := r.updateStatus(ctx, &app, conditions...)
 		if err == nil {
 			log.Info("Application is up to date.")
 		}
@@ -301,7 +302,7 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 	if err != nil {
 		log.Error(err, "failed to create/update the Deployment")
 		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventDeploymentUpsertFailed, "Could not upsert Deployment %s: %s", name, err)
-		statusErr := r.setConditions(ctx, app, metav1.Condition{
+		statusErr := r.updateStatus(ctx, app, metav1.Condition{
 			Type:    yarotskymev1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
 			Reason:  EventDeploymentUpsertFailed,
@@ -317,11 +318,6 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 	case controllerutil.OperationResultUpdated:
 		log.Info("Updated Deployment")
 		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventDeploymentUpdated, "Deployment %s has been updated", name)
-	}
-
-	if err := r.Status().Update(ctx, app); err != nil {
-		log.Error(err, "Failed to update Application status.")
-		return nil, err
 	}
 
 	return &deploy, nil
@@ -349,7 +345,7 @@ func (r *ApplicationReconciler) ensureServiceAccount(ctx context.Context, app *y
 	if err != nil {
 		log.Error(err, "failed to create/update the ServiceACcount")
 		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventServiceAccountUpsertFailed, "Could not upsert service account %s: %s", name, err)
-		statusErr := r.setConditions(ctx, app, metav1.Condition{
+		statusErr := r.updateStatus(ctx, app, metav1.Condition{
 			Type:    yarotskymev1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
 			Reason:  EventServiceAccountUpsertFailed,
@@ -427,7 +423,7 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 		if err != nil {
 			log.Error(err, "failed to create/update RoleBinding")
 			r.Recorder.Eventf(app, corev1.EventTypeWarning, EventRoleBindingUpsertFailed, "Could not upsert RoleBinding %s: %s", name, err)
-			statusErr := r.setConditions(ctx, app, metav1.Condition{
+			statusErr := r.updateStatus(ctx, app, metav1.Condition{
 				Type:    yarotskymev1alpha1.ConditionReady,
 				Status:  metav1.ConditionFalse,
 				Reason:  EventRoleBindingUpsertFailed,
@@ -524,7 +520,7 @@ func (r *ApplicationReconciler) ensureClusterRoleBindings(ctx context.Context, a
 		if err != nil {
 			log.Error(err, "failed to create/update a ClusterRoleBinding")
 			r.Recorder.Eventf(app, corev1.EventTypeWarning, EventClusterRoleBindingUpsertFailed, "Could not upsert ClusterRoleBinding %s: %s", name, err)
-			statusErr := r.setConditions(ctx, app, metav1.Condition{
+			statusErr := r.updateStatus(ctx, app, metav1.Condition{
 				Type:    yarotskymev1alpha1.ConditionReady,
 				Status:  metav1.ConditionFalse,
 				Reason:  EventClusterRoleBindingUpsertFailed,
@@ -596,7 +592,7 @@ func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotsky
 	if err != nil {
 		log.Error(err, "failed to create/update the Service")
 		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventServiceUpsertFailed, "Could not upsert Service %s: %s", name, err)
-		statusErr := r.setConditions(ctx, app, metav1.Condition{
+		statusErr := r.updateStatus(ctx, app, metav1.Condition{
 			Type:    yarotskymev1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
 			Reason:  EventServiceUpsertFailed,
@@ -691,7 +687,7 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 	if err != nil {
 		log.Error(err, "failed to create/update the Ingress")
 		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventIngressUpsertFailed, "Could not upsert Ingress %s: %s", name, err)
-		statusErr := r.setConditions(ctx, app, metav1.Condition{
+		statusErr := r.updateStatus(ctx, app, metav1.Condition{
 			Type:    yarotskymev1alpha1.ConditionReady,
 			Status:  metav1.ConditionFalse,
 			Reason:  EventIngressUpsertFailed,
@@ -817,13 +813,9 @@ func (r *ApplicationReconciler) gk() schema.GroupKind {
 	return gvk.GroupKind()
 }
 
-func (r *ApplicationReconciler) setConditions(ctx context.Context, app *yarotskymev1alpha1.Application, conditions ...metav1.Condition) error {
-	if len(conditions) == 0 {
-		return nil
-	}
-
+func (r *ApplicationReconciler) updateStatus(ctx context.Context, app *yarotskymev1alpha1.Application, conditions ...metav1.Condition) error {
 	log := log.FromContext(ctx)
-	log.Info("Setting conditions", "conditions", conditions)
+	log.Info("Updating status", "conditions", conditions)
 
 	for _, c := range conditions {
 		meta.SetStatusCondition(&app.Status.Conditions, c)
