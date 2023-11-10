@@ -9,12 +9,13 @@
 - [X] Gracefully manage updates
   - [X] To Container/Service/Ingress configurations
   - [X] To Roles
-- [ ] Expose meaningful status on the `Application` CR.
-- [ ] Expose status transitions on the `Application` CR (e.g. when we're updating the image).
+- [X] Expose meaningful status on the `Application` CR.
+- [ ] Expose Events on the `Application` CR (e.g. when we're updating the image).
 - [X] Garbage-collect `ClusterRoleBinding` objects (they cannot be auto-removed via ownership relationship).
 - [ ] Automatically update docker images of Applications (semver).
 - [ ] Add `replicas`
 - [ ] Add `apps` short name
+- [ ] Update README
 
 ## Description
 // TODO(user): An in-depth paragraph about your project and overview of use
