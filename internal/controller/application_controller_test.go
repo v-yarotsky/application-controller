@@ -264,6 +264,7 @@ var _ = Describe("Application controller", func() {
 	It("Should update managed deployments when a new image is available", func(ctx SpecContext) {
 		imageRef := registry.MustUpsertTag("app2", "latest")
 		app := makeApp("app2", imageRef)
+		appName := mkName(app.Namespace, app.Name)
 		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
 
 		deployName := mkName(app.Namespace, app.Name)
@@ -292,6 +293,13 @@ var _ = Describe("Application controller", func() {
 
 			mainContainer := deploy.Spec.Template.Spec.Containers[0]
 			g.Expect(mainContainer.Image).To(Equal(newImageDigestRef.String()))
+		}).WithContext(ctx).Should(Succeed())
+
+		Eventually(func(g Gomega) {
+			err := k8sClient.Get(ctx, appName, &app)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			g.Expect(app.Status.Image).To(Equal(newImageDigestRef.String()))
 		}).WithContext(ctx).Should(Succeed())
 	}, SpecTimeout(5*time.Second))
 

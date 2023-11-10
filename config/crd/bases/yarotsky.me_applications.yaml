@@ -11,10 +11,20 @@ spec:
     kind: Application
     listKind: ApplicationList
     plural: applications
+    shortNames:
+    - app
     singular: application
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.image
+      name: Image
+      type: string
+    - format: date-time
+      jsonPath: .status.imageLastUpdateTime
+      name: Last Update
+      type: string
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: Application is the Schema for the applications API
@@ -2595,6 +2605,13 @@ spec:
                   - type
                   type: object
                 type: array
+              image:
+                type: string
+              imageLastUpdateTime:
+                format: date-time
+                type: string
+            required:
+            - image
             type: object
         type: object
     served: true

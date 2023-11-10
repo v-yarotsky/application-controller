@@ -224,8 +224,10 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 		container = &podTemplateSpec.Containers[0]
 
 		container.Name = app.Name
-		if container.Image != "" && container.Image != imgRef {
+		if container.Image != imgRef {
 			log.Info("Updating container image", "oldimage", container.Image, "newimage", imgRef)
+			app.Status.Image = imgRef
+			app.Status.ImageLastUpdateTime = metav1.Now()
 		}
 		container.Image = imgRef
 		container.ImagePullPolicy = "Always"
@@ -270,6 +272,11 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 		log.Info("Created Deployment")
 	case controllerutil.OperationResultUpdated:
 		log.Info("Updated Deployment")
+	}
+
+	if err := r.Status().Update(ctx, app); err != nil {
+		log.Error(err, "Failed to update Application status.")
+		return nil, err
 	}
 
 	return &deploy, nil

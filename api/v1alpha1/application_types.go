@@ -243,11 +243,16 @@ const (
 
 // ApplicationStatus defines the observed state of Application
 type ApplicationStatus struct {
-	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
+	Image               string             `json:"image"`
+	ImageLastUpdateTime metav1.Time        `json:"imageLastUpdateTime,omitempty"`
+	Conditions          []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:resource:shortName=app
+//+kubebuilder:printcolumn:name="Image",type=string,JSONPath=`.status.image`
+//+kubebuilder:printcolumn:name="Last Update",type=string,format=date-time,JSONPath=`.status.imageLastUpdateTime`
 
 // Application is the Schema for the applications API
 type Application struct {
