@@ -707,12 +707,16 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 	return nil
 }
 
-func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) (bool, error) {
+func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) (done bool, err error) {
 	log := log.FromContext(ctx)
 
 	ownedClusterRoleBindings, err := r.getOwnedClusterRoleBindings(ctx, namer)
 	if err != nil {
 		return false, err
+	}
+
+	if len(ownedClusterRoleBindings) == 0 {
+		return true, nil
 	}
 
 	for _, crb := range ownedClusterRoleBindings {
@@ -727,7 +731,9 @@ func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context,
 		}
 	}
 
-	return true, nil
+	// Make sure we don't attempt to remove the finalizer multiple
+	// times due to reconciliacions triggered by ClusterRoleBinding deletions.
+	return false, nil
 }
 
 func (r *ApplicationReconciler) getOwnedClusterRoleBindings(ctx context.Context, namer Namer) ([]rbacv1.ClusterRoleBinding, error) {
