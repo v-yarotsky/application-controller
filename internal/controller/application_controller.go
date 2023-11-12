@@ -37,6 +37,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	prometheusv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
 	"git.home.yarotsky.me/vlad/application-controller/internal/gkutil"
 	"git.home.yarotsky.me/vlad/application-controller/internal/images"
@@ -82,6 +84,10 @@ const (
 	EventServiceCreated      = "ServiceCreated"
 	EventServiceUpdated      = "ServiceUpdated"
 	EventServiceUpsertFailed = "ServiceUpsertFailed"
+
+	EventPodMonitorCreated      = "PodMonitorCreated"
+	EventPodMonitorUpdated      = "PodMonitorUpdated"
+	EventPodMonitorUpsertFailed = "PodMonitorUpsertFailed"
 )
 
 // ApplicationReconciler reconciles a Application object
@@ -91,8 +97,9 @@ type ApplicationReconciler struct {
 	DefaultIngressClassName   string
 	DefaultIngressAnnotations map[string]string
 	client.Client
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Scheme             *runtime.Scheme
+	Recorder           record.EventRecorder
+	SupportsPrometheus bool
 }
 
 const FinalizerName = "application.yarotsky.me/finalizer"
@@ -113,6 +120,7 @@ const roleBindingOwnerKey = "metadata.controller"
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=bind
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=bind
 //+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
+//+kubebuilder:rbac:groups=monitoring.coreos.com,resources=podmonitors,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -188,6 +196,12 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	if err := r.ensureService(ctx, &app, namer); err != nil {
 		return r.updateStatusWithError(ctx, &app, err, EventServiceUpsertFailed)
+	}
+
+	if r.SupportsPrometheus {
+		if err := r.ensurePodMonitor(ctx, &app, namer); err != nil {
+			return r.updateStatusWithError(ctx, &app, err, EventPodMonitorUpsertFailed)
+		}
 	}
 
 	if err := r.ensureIngress(ctx, &app, namer); err != nil {
@@ -572,6 +586,76 @@ func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotsky
 	return nil
 }
 
+func (r *ApplicationReconciler) ensurePodMonitor(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+	log := log.FromContext(ctx)
+	if app.Spec.Metrics == nil {
+		log.Info("Monitoring is not configured for the app; skipping.")
+		return nil
+	}
+
+	name := namer.PodMonitorName()
+	log = log.WithValues("servicemonitorname", name.String())
+
+	portName := app.Spec.Metrics.PortName
+	if portName == "" {
+		for _, p := range app.Spec.Ports {
+			if p.Name == "metrics" || p.Name == "prometheus" {
+				portName = p.Name
+				break
+			}
+		}
+	}
+
+	if portName == "" {
+		log.Info(`No monitoring port is specified, and there's no port named "metrics" or "prometheus"; skipping PodMonitor creation`)
+		return nil
+	}
+
+	path := app.Spec.Metrics.Path
+	if path == "" {
+		path = "/metrics"
+	}
+
+	mon := prometheusv1.PodMonitor{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name.Name,
+			Namespace: name.Namespace,
+		},
+	}
+
+	result, err := controllerutil.CreateOrPatch(ctx, r.Client, &mon, func() error {
+		mon.Spec.PodMetricsEndpoints = []prometheusv1.PodMetricsEndpoint{
+			{
+				Port: portName,
+				Path: path,
+			},
+		}
+		mon.Spec.Selector = metav1.LabelSelector{MatchLabels: namer.SelectorLabels()}
+
+		if err := controllerutil.SetControllerReference(app, &mon, r.Scheme); err != nil {
+			log.Error(err, "failed to set controller reference on PodMonitor")
+			return err
+		}
+		return nil
+	})
+
+	if err != nil {
+		log.Error(err, "failed to create/update the PodMonitor")
+		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventPodMonitorUpsertFailed, "Could not upsert PodMonitor %s: %s", name, err)
+		return fmt.Errorf("failed to upsert PodMonitor %s: %w", name, err)
+	}
+
+	switch result {
+	case controllerutil.OperationResultCreated:
+		log.Info("Created PodMonitor")
+		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventPodMonitorCreated, "PodMonitor %s has been created", name)
+	case controllerutil.OperationResultUpdated:
+		log.Info("Updated PodMonitor")
+		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventPodMonitorUpdated, "PodMonitor %s has been updated", name)
+	}
+	return nil
+}
+
 func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	name := namer.IngressName()
 	log := log.FromContext(ctx).WithValues("ingressname", name.String())
@@ -708,8 +792,10 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 
-	return ctrl.NewControllerManagedBy(mgr).
-		For(&yarotskymev1alpha1.Application{}).
+	builder := ctrl.NewControllerManagedBy(mgr).
+		For(&yarotskymev1alpha1.Application{})
+
+	builder.
 		Owns(&appsv1.Deployment{}).                                                                    // Reconcile when an owned Deployment is changed.
 		Owns(&corev1.Service{}).                                                                       // Reconcile when an owned Service is changed.
 		Owns(&corev1.ServiceAccount{}).                                                                // Reconcile when an owned AccountService is changed.
@@ -719,8 +805,13 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		WatchesRawSource(                                                                              // Reconcile when a new image becomes available for an Application
 			&source.Channel{Source: r.ImageUpdateEvents},
 			&handler.EnqueueRequestForObject{},
-		).
-		Complete(r)
+		)
+
+	if r.SupportsPrometheus {
+		builder = builder.Owns(&prometheusv1.PodMonitor{}) // Reconcile when an owned PodMonitor is changed
+	}
+
+	return builder.Complete(r)
 }
 
 func (r *ApplicationReconciler) setupIndexes(indexer client.FieldIndexer) error {

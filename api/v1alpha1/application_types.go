@@ -230,6 +230,8 @@ type Ingress struct {
 }
 
 type Metrics struct {
+	Enabled bool `json:"enabled"`
+
 	// Guesses `/metrics` by default
 	Path string `json:"path,omitempty"`
 

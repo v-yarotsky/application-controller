@@ -382,12 +382,16 @@ spec:
                 type: object
               metrics:
                 properties:
+                  enabled:
+                    type: boolean
                   path:
                     description: Guesses `/metrics` by default
                     type: string
                   portName:
                     description: Guesses `metrics` or `prometheus` by default.
                     type: string
+                required:
+                - enabled
                 type: object
               ports:
                 description: List of ports to expose from the container. Not specifying

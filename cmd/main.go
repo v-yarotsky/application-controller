@@ -18,11 +18,14 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
+	"k8s.io/client-go/discovery"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/client-go/rest"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -37,6 +40,7 @@ import (
 	"git.home.yarotsky.me/vlad/application-controller/internal/controller"
 	flagext "git.home.yarotsky.me/vlad/application-controller/internal/flag"
 	"git.home.yarotsky.me/vlad/application-controller/internal/images"
+	prometheusv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -47,7 +51,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
+	utilruntime.Must(prometheusv1.AddToScheme(scheme))
 	utilruntime.Must(yarotskymev1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
@@ -76,6 +80,12 @@ func main() {
 	flag.Parse()
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+
+	hasPrometheus, err := isPrometheusOperatorInstalled()
+	if err != nil {
+		setupLog.Error(err, "failed to check presence of prometheus API types")
+		os.Exit(1)
+	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
@@ -117,6 +127,7 @@ func main() {
 		ImageUpdateEvents:         imageUpdateEvents,
 		DefaultIngressClassName:   ingressClass,
 		DefaultIngressAnnotations: ingressAnnotations,
+		SupportsPrometheus:        hasPrometheus,
 		Recorder:                  mgr.GetEventRecorderFor(controller.Name),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Application")
@@ -144,4 +155,36 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+func isPrometheusOperatorInstalled() (bool, error) {
+	// Ref: https://github.com/kubernetes-sigs/kubebuilder/pull/3055#discussion_r1032753706
+
+	// Get a config to talk to the apiserver
+	cfg, err := rest.InClusterConfig()
+	if err != nil {
+		return false, fmt.Errorf("unable to get kubernetes client config: %w", err)
+	}
+
+	// Create the discoveryClient
+	discoveryClient, err := discovery.NewDiscoveryClientForConfig(cfg)
+	if err != nil {
+		return false, fmt.Errorf("unable to create discovery client: %w", err)
+	}
+
+	// Get a list of all API's on the cluster
+	_, apiResourceList, err := discoveryClient.ServerGroupsAndResources()
+	if err != nil {
+		return false, fmt.Errorf("unable to get Group and Resources: %w", err)
+	}
+
+	for _, r := range apiResourceList {
+		if r.GroupVersion == "monitoring.coreos.com/v1" && r.Kind == "ServiceMonitor" {
+			return true, nil
+		}
+	}
+
+	setupLog.Info("Prometheus operator does not appear to be installed (or the corresponding CRDs are missing). Monitoring will not be automatically setup")
+
+	return false, nil
 }

@@ -21,6 +21,7 @@ import (
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
 	"git.home.yarotsky.me/vlad/application-controller/internal/images"
 	"git.home.yarotsky.me/vlad/application-controller/internal/testutil"
+	prometheusv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 )
 
 var _ = Describe("Application controller", func() {
@@ -471,6 +472,78 @@ var _ = Describe("Application controller", func() {
 
 		By("Setting the Ready status condition to False")
 		EventuallyHaveCondition(ctx, &app, "Ready", metav1.ConditionFalse, "MinimumReplicasUnavailable")
+	}, SpecTimeout(5*time.Second))
+
+	It("Should create PodMonitor with defaults", func(ctx SpecContext) {
+		imageRef := registry.MustUpsertTag("app9", "latest")
+		app := makeApp("app9", imageRef)
+		app.Spec.Ports = append(app.Spec.Ports, corev1.ContainerPort{
+			Name:          "metrics",
+			ContainerPort: 8192,
+			Protocol:      corev1.ProtocolTCP,
+		})
+		app.Spec.Metrics = &yarotskymev1alpha1.Metrics{
+			Enabled: true,
+		}
+		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+
+		By("Creating the PodMonitor")
+		Eventually(func(g Gomega) {
+			var pm prometheusv1.PodMonitor
+			pmName := mkName(app.Namespace, app.Name)
+
+			err := k8sClient.Get(ctx, pmName, &pm)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			g.Expect(pm.Spec.PodMetricsEndpoints).To(ConsistOf(
+				prometheusv1.PodMetricsEndpoint{
+					Port: "metrics",
+					Path: "/metrics",
+				},
+			))
+
+			g.Expect(pm.Spec.Selector).To(Equal(
+				metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"app.kubernetes.io/name":       app.Name,
+						"app.kubernetes.io/managed-by": "application-controller",
+						"app.kubernetes.io/instance":   "default",
+						"app.kubernetes.io/version":    "0.1.0",
+					},
+				}))
+		}).WithContext(ctx).Should(Succeed())
+	}, SpecTimeout(5*time.Second))
+
+	It("Should create PodMonitor with overrides", func(ctx SpecContext) {
+		imageRef := registry.MustUpsertTag("app10", "latest")
+		app := makeApp("app10", imageRef)
+		app.Spec.Ports = append(app.Spec.Ports, corev1.ContainerPort{
+			Name:          "mymetrics",
+			ContainerPort: 8192,
+			Protocol:      corev1.ProtocolTCP,
+		})
+		app.Spec.Metrics = &yarotskymev1alpha1.Metrics{
+			Enabled:  true,
+			PortName: "mymetrics",
+			Path:     "/mymetrics",
+		}
+		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+
+		By("Creating the PodMonitor")
+		Eventually(func(g Gomega) {
+			var pm prometheusv1.PodMonitor
+			pmName := mkName(app.Namespace, app.Name)
+
+			err := k8sClient.Get(ctx, pmName, &pm)
+			g.Expect(err).NotTo(HaveOccurred())
+
+			g.Expect(pm.Spec.PodMetricsEndpoints).To(ConsistOf(
+				prometheusv1.PodMetricsEndpoint{
+					Port: "mymetrics",
+					Path: "/mymetrics",
+				},
+			))
+		}).WithContext(ctx).Should(Succeed())
 	}, SpecTimeout(5*time.Second))
 })
 
