@@ -27,7 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -687,7 +687,7 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 		if r.DefaultIngressClassName == "" {
 			return fmt.Errorf("ingress.ingressClassName is not specified, and --ingress-class is not set.")
 		}
-		ingressClassName = pointer.String(r.DefaultIngressClassName)
+		ingressClassName = ptr.To(r.DefaultIngressClassName)
 	}
 
 	ing := networkingv1.Ingress{

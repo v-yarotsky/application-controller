@@ -14,7 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
@@ -56,7 +56,7 @@ var _ = Describe("Application controller", func() {
 					},
 				},
 				Ingress: &yarotskymev1alpha1.Ingress{
-					IngressClassName: pointer.String("traefik"),
+					IngressClassName: ptr.To("traefik"),
 					Host:             "dashboard.home.yarotsky.me",
 				},
 				Roles: []yarotskymev1alpha1.ScopedRoleRef{
