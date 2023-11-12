@@ -139,8 +139,6 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, err
 	}
 
-	// beforeApp := app.DeepCopy()
-
 	namer := &simpleNamer{&app}
 
 	if len(app.Status.Conditions) == 0 {
@@ -198,10 +196,8 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.updateStatusWithError(ctx, &app, err, EventServiceUpsertFailed)
 	}
 
-	if r.SupportsPrometheus {
-		if err := r.ensurePodMonitor(ctx, &app, namer); err != nil {
-			return r.updateStatusWithError(ctx, &app, err, EventPodMonitorUpsertFailed)
-		}
+	if err := r.ensurePodMonitor(ctx, &app, namer); err != nil {
+		return r.updateStatusWithError(ctx, &app, err, EventPodMonitorUpsertFailed)
 	}
 
 	if err := r.ensureIngress(ctx, &app, namer); err != nil {
@@ -588,6 +584,12 @@ func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotsky
 
 func (r *ApplicationReconciler) ensurePodMonitor(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	log := log.FromContext(ctx)
+
+	if !r.SupportsPrometheus {
+		log.Info("Cluster does not appear to support Prometheus monitoring; skipping.")
+		return nil
+	}
+
 	if app.Spec.Metrics == nil {
 		log.Info("Monitoring is not configured for the app; skipping.")
 		return nil

@@ -20,6 +20,7 @@ import (
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
 	"git.home.yarotsky.me/vlad/application-controller/internal/images"
+	"git.home.yarotsky.me/vlad/application-controller/internal/k8s"
 	"git.home.yarotsky.me/vlad/application-controller/internal/testutil"
 	prometheusv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 )
@@ -502,6 +503,12 @@ var _ = Describe("Application controller", func() {
 				},
 			))
 		})
+	}, SpecTimeout(5*time.Second))
+
+	It("Should determine whether Prometheus is supported", func(ctx SpecContext) {
+		hasPrometheus, err := k8s.IsPrometheusOperatorInstalled(cfg)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(hasPrometheus).To(BeTrue())
 	}, SpecTimeout(5*time.Second))
 })
 
