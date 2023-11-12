@@ -633,6 +633,7 @@ func (r *ApplicationReconciler) ensurePodMonitor(ctx context.Context, app *yarot
 			},
 		}
 		mon.Spec.Selector = metav1.LabelSelector{MatchLabels: namer.SelectorLabels()}
+		mon.Spec.PodTargetLabels = []string{"app.kubernetes.io/name"}
 
 		if err := controllerutil.SetControllerReference(app, &mon, r.Scheme); err != nil {
 			log.Error(err, "failed to set controller reference on PodMonitor")

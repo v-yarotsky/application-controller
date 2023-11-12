@@ -102,6 +102,5 @@ func (a *simpleNamer) SelectorLabels() map[string]string {
 		"app.kubernetes.io/name":       a.Name,
 		"app.kubernetes.io/managed-by": Name,
 		"app.kubernetes.io/instance":   "default",
-		"app.kubernetes.io/version":    "0.1.0",
 	}
 }

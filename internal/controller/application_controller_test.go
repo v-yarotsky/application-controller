@@ -208,7 +208,6 @@ var _ = Describe("Application controller", func() {
 				"app.kubernetes.io/name":       app.Name,
 				"app.kubernetes.io/managed-by": "application-controller",
 				"app.kubernetes.io/instance":   "default",
-				"app.kubernetes.io/version":    "0.1.0",
 			}))
 		})
 
@@ -471,7 +470,6 @@ var _ = Describe("Application controller", func() {
 						"app.kubernetes.io/name":       app.Name,
 						"app.kubernetes.io/managed-by": "application-controller",
 						"app.kubernetes.io/instance":   "default",
-						"app.kubernetes.io/version":    "0.1.0",
 					},
 				}))
 		})
