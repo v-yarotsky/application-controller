@@ -119,11 +119,8 @@ var _ = Describe("Application controller", func() {
 		EventuallyGetObject(ctx, serviceAccountName, &serviceAccount)
 
 		By("Creating cluster role bindings for ClusterRoles")
-		Eventually(func(g Gomega) {
-			var crb rbacv1.ClusterRoleBinding
-			err := k8sClient.Get(ctx, mkName("", "default-app1-clusterrole-my-cluster-role"), &crb)
-			g.Expect(err).NotTo(HaveOccurred())
-
+		var crb rbacv1.ClusterRoleBinding
+		EventuallyGetObject(ctx, mkName("", "default-app1-clusterrole-my-cluster-role"), &crb, func(g Gomega) {
 			g.Expect(crb.Subjects).To(ContainElement(rbacv1.Subject{
 				APIGroup:  "",
 				Kind:      "ServiceAccount",
@@ -136,14 +133,11 @@ var _ = Describe("Application controller", func() {
 				Kind:     "ClusterRole",
 				Name:     "my-cluster-role",
 			}))
-		}).WithContext(ctx).Should(Succeed())
+		})
 
 		By("Creating role bindings for ClusterRoles")
-		Eventually(func(g Gomega) {
-			var rb rbacv1.RoleBinding
-			err := k8sClient.Get(ctx, mkName(app.Namespace, "app1-clusterrole-my-cluster-role-for-namespace"), &rb)
-			g.Expect(err).NotTo(HaveOccurred())
-
+		var rb rbacv1.RoleBinding
+		EventuallyGetObject(ctx, mkName(app.Namespace, "app1-clusterrole-my-cluster-role-for-namespace"), &rb, func(g Gomega) {
 			g.Expect(rb.Subjects).To(ContainElement(rbacv1.Subject{
 				APIGroup:  "",
 				Kind:      "ServiceAccount",
@@ -156,34 +150,28 @@ var _ = Describe("Application controller", func() {
 				Kind:     "ClusterRole",
 				Name:     "my-cluster-role-for-namespace",
 			}))
-		}).WithContext(ctx).Should(Succeed())
+		})
 
 		By("Creating role bindings for Roles")
-		Eventually(func(g Gomega) {
-			var rb rbacv1.RoleBinding
-			err := k8sClient.Get(ctx, mkName(app.Namespace, "app1-role-my-role"), &rb)
-			g.Expect(err).NotTo(HaveOccurred())
-
-			g.Expect(rb.Subjects).To(ContainElement(rbacv1.Subject{
+		var rb2 rbacv1.RoleBinding
+		EventuallyGetObject(ctx, mkName(app.Namespace, "app1-role-my-role"), &rb2, func(g Gomega) {
+			g.Expect(rb2.Subjects).To(ContainElement(rbacv1.Subject{
 				APIGroup:  "",
 				Kind:      "ServiceAccount",
 				Name:      serviceAccountName.Name,
 				Namespace: serviceAccountName.Namespace,
 			}))
 
-			g.Expect(rb.RoleRef).To(Equal(rbacv1.RoleRef{
+			g.Expect(rb2.RoleRef).To(Equal(rbacv1.RoleRef{
 				APIGroup: "rbac.authorization.k8s.io",
 				Kind:     "Role",
 				Name:     "my-role",
 			}))
-		}).WithContext(ctx).Should(Succeed())
+		})
 
 		By("Creating a deployment")
-		Eventually(func(g Gomega) {
-			var deploy appsv1.Deployment
-			err := k8sClient.Get(ctx, mkName(app.Namespace, app.Name), &deploy)
-			g.Expect(err).NotTo(HaveOccurred())
-
+		var deploy appsv1.Deployment
+		EventuallyGetObject(ctx, mkName(app.Namespace, app.Name), &deploy, func(g Gomega) {
 			g.Expect(deploy.Spec.Template.Spec.ServiceAccountName).To(Equal(serviceAccountName.Name))
 			g.Expect(deploy.Spec.Template.Spec.Volumes).To(ContainElement(
 				SatisfyAll(
@@ -202,15 +190,12 @@ var _ = Describe("Application controller", func() {
 				Name:      "data",
 				MountPath: "/data",
 			}))
-		}).WithContext(ctx).Should(Succeed())
+		})
 
 		By("Creating a service")
 		serviceName := mkName(app.Namespace, app.Name)
-		Eventually(func(g Gomega) {
-			var service corev1.Service
-			err := k8sClient.Get(ctx, serviceName, &service)
-			g.Expect(err).NotTo(HaveOccurred())
-
+		var service corev1.Service
+		EventuallyGetObject(ctx, serviceName, &service, func(g Gomega) {
 			g.Expect(service.Spec.Ports).To(ContainElement(corev1.ServicePort{
 				Name:       "http",
 				TargetPort: intstr.FromString("http"),
@@ -224,14 +209,11 @@ var _ = Describe("Application controller", func() {
 				"app.kubernetes.io/instance":   "default",
 				"app.kubernetes.io/version":    "0.1.0",
 			}))
-		}).WithContext(ctx).Should(Succeed())
+		})
 
 		By("Creating an Ingress")
-		Eventually(func(g Gomega) {
-			var ingress networkingv1.Ingress
-			err := k8sClient.Get(ctx, mkName(app.Namespace, app.Name), &ingress)
-			g.Expect(err).NotTo(HaveOccurred())
-
+		var ingress networkingv1.Ingress
+		EventuallyGetObject(ctx, mkName(app.Namespace, app.Name), &ingress, func(g Gomega) {
 			g.Expect(*ingress.Spec.IngressClassName).To(Equal("traefik"))
 			g.Expect(ingress.Annotations).To(Equal(map[string]string{
 				"foo": "bar",
@@ -259,7 +241,7 @@ var _ = Describe("Application controller", func() {
 					},
 				},
 			}))
-		}).WithContext(ctx).Should(Succeed())
+		})
 	}, SpecTimeout(5*time.Second))
 
 	It("Should update managed deployments when a new image is available", func(ctx SpecContext) {
@@ -272,36 +254,27 @@ var _ = Describe("Application controller", func() {
 		var deploy appsv1.Deployment
 
 		By("Creating a deployment with the current image")
-		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, deployName, &deploy)
-			g.Expect(err).NotTo(HaveOccurred())
-
+		EventuallyGetObject(ctx, deployName, &deploy, func(g Gomega) {
 			g.Expect(deploy.Spec.Template.Spec.Containers).To(HaveLen(1))
 
 			mainContainer := deploy.Spec.Template.Spec.Containers[0]
 			g.Expect(mainContainer.Image).To(Equal(imageRef.String()))
-		}).WithContext(ctx).Should(Succeed())
+		})
 
 		By("Eventually updating the image")
 		newImageDigestRef := registry.MustUpsertTag("app2", "latest")
 		imageUpdateEvents <- event.GenericEvent{Object: &app}
 
-		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, deployName, &deploy)
-			g.Expect(err).NotTo(HaveOccurred())
-
+		EventuallyGetObject(ctx, deployName, &deploy, func(g Gomega) {
 			g.Expect(deploy.Spec.Template.Spec.Containers).To(HaveLen(1))
 
 			mainContainer := deploy.Spec.Template.Spec.Containers[0]
 			g.Expect(mainContainer.Image).To(Equal(newImageDigestRef.String()))
-		}).WithContext(ctx).Should(Succeed())
+		})
 
-		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, appName, &app)
-			g.Expect(err).NotTo(HaveOccurred())
-
+		EventuallyGetObject(ctx, appName, &app, func(g Gomega) {
 			g.Expect(app.Status.Image).To(Equal(newImageDigestRef.String()))
-		}).WithContext(ctx).Should(Succeed())
+		})
 	}, SpecTimeout(5*time.Second))
 
 	It("Should use default ingress class when no explicit ingress class is specified", func(ctx SpecContext) {
@@ -312,14 +285,10 @@ var _ = Describe("Application controller", func() {
 		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
 
 		By("Creating an Ingress")
-		Eventually(func(g Gomega) {
-			var ingress networkingv1.Ingress
-			err := k8sClient.Get(ctx, mkName(app.Namespace, app.Name), &ingress)
-			g.Expect(err).NotTo(HaveOccurred())
-
+		var ingress networkingv1.Ingress
+		EventuallyGetObject(ctx, mkName(app.Namespace, app.Name), &ingress, func(g Gomega) {
 			g.Expect(*ingress.Spec.IngressClassName).To(Equal("nginx-private"))
-		}).WithContext(ctx).Should(Succeed())
-
+		})
 	}, SpecTimeout(5*time.Second))
 
 	It("Should properly delete created ClusterRoleBinding objects", func(ctx SpecContext) {
@@ -361,15 +330,12 @@ var _ = Describe("Application controller", func() {
 		})
 
 		By("Eventually updating the deployment")
-		Eventually(func(g Gomega) {
-			err := k8sClient.Get(ctx, deployName, &deploy)
-			g.Expect(err).NotTo(HaveOccurred())
-
+		EventuallyGetObject(ctx, deployName, &deploy, func(g Gomega) {
 			g.Expect(deploy.Spec.Template.Spec.Containers).To(HaveLen(1))
 
 			mainContainer := deploy.Spec.Template.Spec.Containers[0]
 			g.Expect(mainContainer.Env).To(ContainElement(corev1.EnvVar{Name: "MY_ENV_VAR", Value: "FOO"}))
-		}).WithContext(ctx).Should(Succeed())
+		})
 	}, SpecTimeout(5*time.Second))
 
 	It("Should remove rolebindings for removed roles", func(ctx SpecContext) {
@@ -488,13 +454,9 @@ var _ = Describe("Application controller", func() {
 		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
 
 		By("Creating the PodMonitor")
-		Eventually(func(g Gomega) {
-			var pm prometheusv1.PodMonitor
-			pmName := mkName(app.Namespace, app.Name)
-
-			err := k8sClient.Get(ctx, pmName, &pm)
-			g.Expect(err).NotTo(HaveOccurred())
-
+		var pm prometheusv1.PodMonitor
+		pmName := mkName(app.Namespace, app.Name)
+		EventuallyGetObject(ctx, pmName, &pm, func(g Gomega) {
 			g.Expect(pm.Spec.PodMetricsEndpoints).To(ConsistOf(
 				prometheusv1.PodMetricsEndpoint{
 					Port: "metrics",
@@ -511,7 +473,7 @@ var _ = Describe("Application controller", func() {
 						"app.kubernetes.io/version":    "0.1.0",
 					},
 				}))
-		}).WithContext(ctx).Should(Succeed())
+		})
 	}, SpecTimeout(5*time.Second))
 
 	It("Should create PodMonitor with overrides", func(ctx SpecContext) {
@@ -530,29 +492,29 @@ var _ = Describe("Application controller", func() {
 		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
 
 		By("Creating the PodMonitor")
-		Eventually(func(g Gomega) {
-			var pm prometheusv1.PodMonitor
-			pmName := mkName(app.Namespace, app.Name)
-
-			err := k8sClient.Get(ctx, pmName, &pm)
-			g.Expect(err).NotTo(HaveOccurred())
-
+		var pm prometheusv1.PodMonitor
+		pmName := mkName(app.Namespace, app.Name)
+		EventuallyGetObject(ctx, pmName, &pm, func(g Gomega) {
 			g.Expect(pm.Spec.PodMetricsEndpoints).To(ConsistOf(
 				prometheusv1.PodMetricsEndpoint{
 					Port: "mymetrics",
 					Path: "/mymetrics",
 				},
 			))
-		}).WithContext(ctx).Should(Succeed())
+		})
 	}, SpecTimeout(5*time.Second))
 })
 
-func EventuallyGetObject(ctx context.Context, name types.NamespacedName, obj client.Object) {
+func EventuallyGetObject(ctx context.Context, name types.NamespacedName, obj client.Object, matchFns ...func(g Gomega)) {
 	GinkgoHelper()
 
 	Eventually(func(g Gomega) {
 		err := k8sClient.Get(ctx, name, obj)
 		g.Expect(err).NotTo(HaveOccurred())
+
+		for _, f := range matchFns {
+			f(g)
+		}
 	}).WithContext(ctx).Should(Succeed())
 }
 
