@@ -18,7 +18,7 @@ type ImageWatcher interface {
 func NewSillyImageWatcher(client client.Client) *sillyImageWatcher {
 	return &sillyImageWatcher{
 		client:   client,
-		interval: 30 * time.Second,
+		interval: 5 * time.Minute,
 	}
 }
 

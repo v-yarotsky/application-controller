@@ -16,7 +16,11 @@
 - [X] Automatically update docker images of Applications (semver).
 - [X] Add `app` short name
 - [ ] Ensure we don't hammer the image registry on errors (requeue reconciliation with increased interval)
+- [ ] Make image checking interval configurable
 - [ ] Update README
+- [ ] Create an Update Schedule CR (cluster-wide)
+  - [ ] Allow choosing a default one via annotation
+  - [ ] Allow Applications to pick a particular update schedule
 
 ## Description
 // TODO(user): An in-depth paragraph about your project and overview of use
