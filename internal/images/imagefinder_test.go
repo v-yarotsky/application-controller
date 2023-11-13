@@ -23,7 +23,7 @@ func TestImageFinderWithDigestStrategy(t *testing.T) {
 	versionSpec := yarotskymev1alpha1.ImageSpec{
 		Repository:      fmt.Sprintf("%s/foo", s.URL.Host),
 		VersionStrategy: "Digest",
-		Digest: yarotskymev1alpha1.VersionStrategyDigestSpec{
+		Digest: &yarotskymev1alpha1.VersionStrategyDigestSpec{
 			Tag: "latest",
 		},
 	}
@@ -52,7 +52,7 @@ func TestImageFinderWithSemVerStrategy(t *testing.T) {
 	versionSpec := yarotskymev1alpha1.ImageSpec{
 		Repository:      fmt.Sprintf("%s/foo", s.URL.Host),
 		VersionStrategy: "SemVer",
-		SemVer: yarotskymev1alpha1.VersionStrategySemVerSpec{
+		SemVer: &yarotskymev1alpha1.VersionStrategySemVerSpec{
 			Constraint: "^1.1.0",
 		},
 	}
@@ -62,8 +62,14 @@ func TestImageFinderWithSemVerStrategy(t *testing.T) {
 		t.Errorf("the finder should not have found an image, but got error: %s", err)
 	}
 
+	_ = s.MustUpsertTag("foo", "latest")
+	_, err = finder.FindImage(context.Background(), versionSpec)
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("the finder should not have found an image, but got error: %s", err)
+	}
+
 	_ = s.MustUpsertTag("foo", "1.1.0")
-	want := s.MustUpsertTag("foo", "1.2.0")
+	want := s.MustUpsertTag("foo", "v1.2.0") // also checks that the `v` prefix is ignored.
 	_ = s.MustUpsertTag("foo", "2.0.0")
 	mustFindImage(t, finder, versionSpec, want)
 

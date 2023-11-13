@@ -209,6 +209,7 @@ spec:
                     description: Version selection strategy, e.g. `Digest`.
                     enum:
                     - Digest
+                    - SemVer
                     type: string
                 required:
                 - repository

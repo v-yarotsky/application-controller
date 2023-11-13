@@ -18,10 +18,10 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
-	"go.uber.org/multierr"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -132,7 +132,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	var app yarotskymev1alpha1.Application
 	if err := r.Get(ctx, req.NamespacedName, &app); err != nil {
-		if errors.IsNotFound(err) {
+		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
 		log.Error(err, "unable to fetch Application")
@@ -885,7 +885,7 @@ func (r *ApplicationReconciler) updateStatus(ctx context.Context, app *yarotskym
 	log.Info("Updating status", "status", app.Status)
 
 	if err := r.Status().Update(ctx, app); err != nil {
-		if errors.IsConflict(err) {
+		if apierrors.IsConflict(err) {
 			log.Info("Got a status update conflict, requeuing.")
 			return ctrl.Result{Requeue: true}, nil
 		}
@@ -903,5 +903,5 @@ func (r *ApplicationReconciler) updateStatusWithError(ctx context.Context, app *
 		Message: err.Error(),
 	})
 	result, statusErr := r.updateStatus(ctx, app)
-	return result, multierr.Combine(err, statusErr)
+	return result, errors.Join(err, statusErr)
 }

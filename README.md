@@ -15,6 +15,7 @@
 - [X] Garbage-collect `ClusterRoleBinding` objects (they cannot be auto-removed via ownership relationship).
 - [X] Automatically update docker images of Applications (semver).
 - [X] Add `app` short name
+- [ ] Ensure we don't hammer the image registry on errors (requeue reconciliation with increased interval)
 - [ ] Update README
 
 ## Description

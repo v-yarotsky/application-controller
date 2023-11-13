@@ -135,10 +135,10 @@ type ImageSpec struct {
 	Repository string `json:"repository"`
 
 	// Version selection strategy, e.g. `Digest`.
-	// +kubebuilder:validation:Enum=Digest
-	VersionStrategy VersionStrategy           `json:"versionStrategy"`
-	Digest          VersionStrategyDigestSpec `json:"digest,omitempty"`
-	SemVer          VersionStrategySemVerSpec `json:"semver,omitempty"`
+	// +kubebuilder:validation:Enum=Digest;SemVer
+	VersionStrategy VersionStrategy            `json:"versionStrategy"`
+	Digest          *VersionStrategyDigestSpec `json:"digest,omitempty"`
+	SemVer          *VersionStrategySemVerSpec `json:"semver,omitempty"`
 }
 
 // VersionStrategy determines how the controller checks for the new

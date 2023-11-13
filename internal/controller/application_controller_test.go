@@ -44,7 +44,7 @@ var _ = Describe("Application controller", func() {
 				Image: yarotskymev1alpha1.ImageSpec{
 					Repository:      imageRef.Repository,
 					VersionStrategy: "Digest",
-					Digest: yarotskymev1alpha1.VersionStrategyDigestSpec{
+					Digest: &yarotskymev1alpha1.VersionStrategyDigestSpec{
 						Tag: "latest",
 					},
 				},

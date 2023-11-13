@@ -2,6 +2,7 @@ package images
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -88,7 +89,11 @@ func (f *imageFinder) FindImage(ctx context.Context, spec yarotskymev1alpha1.Ima
 	}
 }
 
-func (f *imageFinder) findImageByDigest(ctx context.Context, repo string, spec yarotskymev1alpha1.VersionStrategyDigestSpec) (*ImageRef, error) {
+func (f *imageFinder) findImageByDigest(ctx context.Context, repo string, spec *yarotskymev1alpha1.VersionStrategyDigestSpec) (*ImageRef, error) {
+	if spec == nil {
+		return nil, fmt.Errorf("`digest` version strategy spec is empty!")
+	}
+
 	tagRef := ImageRef{Repository: repo, Tag: spec.Tag}
 	digest, err := f.registryClient.GetDigest(ctx, tagRef)
 	if err != nil {
@@ -100,7 +105,15 @@ func (f *imageFinder) findImageByDigest(ctx context.Context, repo string, spec y
 	return &newRef, nil
 }
 
-func (f *imageFinder) findImageBySemver(ctx context.Context, repo string, spec yarotskymev1alpha1.VersionStrategySemVerSpec) (*ImageRef, error) {
+var (
+	ErrNotFound = errors.New("Suitable image not found")
+)
+
+func (f *imageFinder) findImageBySemver(ctx context.Context, repo string, spec *yarotskymev1alpha1.VersionStrategySemVerSpec) (*ImageRef, error) {
+	if spec == nil {
+		return nil, fmt.Errorf("`semver` version strategy spec is empty!")
+	}
+
 	constraint, err := semver.NewConstraint(spec.Constraint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse semver constraint %s: %w", spec.Constraint, err)
@@ -117,7 +130,7 @@ func (f *imageFinder) findImageBySemver(ctx context.Context, repo string, spec y
 	for _, tag := range tags {
 		v, err := semver.NewVersion(tag)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse semver version from tag %q: %w", tag, err)
+			continue // not a valid semver-like tag; skip
 		}
 
 		vs = append(vs, v)
@@ -132,6 +145,10 @@ func (f *imageFinder) findImageBySemver(ctx context.Context, repo string, spec y
 			tag = vsToTags[v]
 			break
 		}
+	}
+
+	if tag == "" {
+		return nil, fmt.Errorf("%w: no semver-like tags matching constraint %q could be found for repo %q", ErrNotFound, spec.Constraint, repo)
 	}
 
 	newRef := ref
