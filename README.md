@@ -13,7 +13,7 @@
 - [X] Expose Events on the `Application` CR (e.g. when we're updating the image).
 - [X] Expose current image in status
 - [X] Garbage-collect `ClusterRoleBinding` objects (they cannot be auto-removed via ownership relationship).
-- [ ] Automatically update docker images of Applications (semver).
+- [X] Automatically update docker images of Applications (semver).
 - [X] Add `app` short name
 - [ ] Update README
 

@@ -138,6 +138,7 @@ type ImageSpec struct {
 	// +kubebuilder:validation:Enum=Digest
 	VersionStrategy VersionStrategy           `json:"versionStrategy"`
 	Digest          VersionStrategyDigestSpec `json:"digest,omitempty"`
+	SemVer          VersionStrategySemVerSpec `json:"semver,omitempty"`
 }
 
 // VersionStrategy determines how the controller checks for the new
@@ -147,11 +148,21 @@ type VersionStrategy string
 
 const (
 	VersionStrategyDigest = VersionStrategy("Digest")
+	VersionStrategySemver = VersionStrategy("SemVer")
 )
 
 type VersionStrategyDigestSpec struct {
 	// Mutable tag to watch for new digests.
 	Tag string `json:"tag"`
+}
+
+type VersionStrategySemVerSpec struct {
+	// SemVer constraint as defined by https://github.com/Masterminds/semver
+	// Examples:
+	// - `1.x` (equivalent to `>= 1.0.0 < 2.0.0`
+	// - `~1.2` (equivalent to `>= 1.2.0 < 2.0.0`
+	// - `^1.2.3` (equivalent to `>= 1.2.3 < 2.0.0`
+	Constraint string `json:"constraint"`
 }
 
 // RoleBindingScope determines whether a namespaced RoleBinding

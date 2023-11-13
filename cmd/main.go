@@ -113,7 +113,7 @@ func main() {
 	}
 
 	imageFinder, err := images.NewImageFinder(
-		images.WithInClusterRegistryAuth(imagePullSecrets),
+		images.WithAuthenticatedRegistryClient(imagePullSecrets),
 	)
 	if err != nil {
 		setupLog.Error(err, "failed to instantiate image finder")

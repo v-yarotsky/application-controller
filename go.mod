@@ -3,6 +3,7 @@ module git.home.yarotsky.me/vlad/application-controller
 go 1.20
 
 require (
+	github.com/Masterminds/semver/v3 v3.2.1
 	github.com/google/go-containerregistry v0.16.1
 	github.com/google/go-containerregistry/pkg/authn/kubernetes v0.0.0-20230516205744-dbecb1de8cfa
 	github.com/google/uuid v1.3.0

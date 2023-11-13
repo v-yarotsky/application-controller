@@ -194,6 +194,17 @@ spec:
                   repository:
                     description: OCI Image repository.
                     type: string
+                  semver:
+                    properties:
+                      constraint:
+                        description: 'SemVer constraint as defined by https://github.com/Masterminds/semver
+                          Examples: - `1.x` (equivalent to `>= 1.0.0 < 2.0.0` - `~1.2`
+                          (equivalent to `>= 1.2.0 < 2.0.0` - `^1.2.3` (equivalent
+                          to `>= 1.2.3 < 2.0.0`'
+                        type: string
+                    required:
+                    - constraint
+                    type: object
                   versionStrategy:
                     description: Version selection strategy, e.g. `Digest`.
                     enum:
