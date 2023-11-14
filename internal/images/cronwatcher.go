@@ -13,7 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-func NewCronImageWatcherWithDefaults(client client.Client, defaultSchedule string, imagePullSecrets []string) (*cronImageWatcher, error) {
+func NewCronImageWatcherWithDefaults(client client.Client, defaultSchedule string, imagePullSecrets []string, scheduleReconcileInterval time.Duration) (*cronImageWatcher, error) {
 	imageFinder, err := NewImageFinder(
 		WithAuthenticatedRegistryClient(imagePullSecrets),
 	)
@@ -26,7 +26,7 @@ func NewCronImageWatcherWithDefaults(client client.Client, defaultSchedule strin
 		lister,
 		CronSchedule(defaultSchedule),
 		imageFinder,
-		NewPeriodicReconcileUpdateScheduleTrigger(30*time.Second),
+		NewPeriodicReconcileUpdateScheduleTrigger(scheduleReconcileInterval),
 	), nil
 }
 

@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -104,14 +105,14 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).ToNot(HaveOccurred())
 
-	imageFinder, err := images.NewImageFinder()
+	watcher, err := images.NewCronImageWatcherWithDefaults(k8sManager.GetClient(), "@every 1s", nil, time.Second)
 	Expect(err).ToNot(HaveOccurred())
 
 	imageUpdateEvents = make(chan event.GenericEvent)
 	err = (&ApplicationReconciler{
 		Client:                  k8sManager.GetClient(),
 		Scheme:                  k8sManager.GetScheme(),
-		ImageFinder:             imageFinder,
+		ImageFinder:             watcher,
 		ImageUpdateEvents:       imageUpdateEvents,
 		DefaultIngressClassName: "nginx-private",
 		DefaultIngressAnnotations: map[string]string{
@@ -121,6 +122,8 @@ var _ = BeforeSuite(func() {
 		SupportsPrometheus: true,
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
+
+	go watcher.WatchForNewImages(ctx, imageUpdateEvents)
 
 	go func() {
 		defer GinkgoRecover()
