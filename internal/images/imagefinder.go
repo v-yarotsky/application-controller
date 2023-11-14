@@ -13,12 +13,6 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
 
-type ImageFinder interface {
-	// FindImage takes an image version tracking spec, and returns
-	// a new image reference.
-	FindImage(ctx context.Context, spec yarotskymev1alpha1.ImageSpec) (*ImageRef, error)
-}
-
 func NewImageFinder(opts ...Option) (*imageFinder, error) {
 	cfg := &config{
 		registryClient: &simpleRegistryClient{},

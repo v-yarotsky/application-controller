@@ -7,21 +7,11 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
 
-type RegistryClient interface {
-	// ListTags lists tags for a given repository.
-	// Per spec[^1], tags are returned in lexicographical order.
-	// [^1]: https://github.com/opencontainers/distribution-spec/blob/main/spec.md#listing-tags
-	ListTags(ctx context.Context, ref ImageRef) ([]string, error)
-
-	// GetDigest returns the current sha256 digest of the given tag for a given repository as a string.
-	GetDigest(ctx context.Context, ref ImageRef) (string, error)
-}
+var _ RegistryClient = &simpleRegistryClient{}
 
 type simpleRegistryClient struct {
 	extraOpts []remote.Option
 }
-
-var _ RegistryClient = &simpleRegistryClient{}
 
 func (c *simpleRegistryClient) ListTags(ctx context.Context, ref ImageRef) ([]string, error) {
 	tags, err := remote.List(ref.ToGoContainerRegistryRepository(), c.opts(ctx)...)

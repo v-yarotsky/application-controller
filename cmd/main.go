@@ -112,19 +112,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	imageFinder, err := images.NewImageFinder(
-		images.WithAuthenticatedRegistryClient(imagePullSecrets),
+	imageWatcher, err := images.NewCronImageWatcherWithDefaults(
+		mgr.GetClient(),
+		"*/5 * * * *",
+		imagePullSecrets,
 	)
+
 	if err != nil {
-		setupLog.Error(err, "failed to instantiate image finder")
+		setupLog.Error(err, "failed to instantiate image watcher")
 		os.Exit(1)
 	}
-
-	imageWatcher := images.NewCronImageWatcher(
-		mgr.GetClient(),
-		images.CronSchedule("*/5 * * * *"),
-		imageFinder,
-	)
 
 	imageUpdateEvents := make(chan event.GenericEvent)
 
