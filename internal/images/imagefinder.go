@@ -2,7 +2,6 @@ package images
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 
@@ -98,10 +97,6 @@ func (f *imageFinder) findImageByDigest(ctx context.Context, repo string, spec *
 	newRef.Digest = digest
 	return &newRef, nil
 }
-
-var (
-	ErrNotFound = errors.New("Suitable image not found")
-)
 
 func (f *imageFinder) findImageBySemver(ctx context.Context, repo string, spec *yarotskymev1alpha1.VersionStrategySemVerSpec) (*ImageRef, error) {
 	if spec == nil {

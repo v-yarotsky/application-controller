@@ -2,6 +2,8 @@ package images
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
 	"github.com/go-co-op/gocron"
@@ -49,8 +51,16 @@ type RegistryClient interface {
 	GetDigest(ctx context.Context, ref ImageRef) (string, error)
 }
 
+type ReconcileUpdateScheduleTrigger interface {
+	ReconcileUpdateSchedule() <-chan time.Time
+}
+
 type CronSchedule string
 type Job struct {
 	Schedule CronSchedule
 	CronJob  *gocron.Job
 }
+
+var (
+	ErrNotFound = errors.New("Suitable image not found")
+)

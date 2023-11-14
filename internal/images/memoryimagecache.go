@@ -81,3 +81,10 @@ func (c *inMemoryImageCache) key(spec yarotskymev1alpha1.ImageSpec) string {
 }
 
 var _ ImageCache = &inMemoryImageCache{}
+
+type ImageSpecKeyType string
+
+func ImageSpecKey(spec yarotskymev1alpha1.ImageSpec) ImageSpecKeyType {
+	keyBytes, _ := json.Marshal(spec)
+	return ImageSpecKeyType(keyBytes)
+}

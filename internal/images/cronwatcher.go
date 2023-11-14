@@ -26,10 +26,11 @@ func NewCronImageWatcherWithDefaults(client client.Client, defaultSchedule strin
 		lister,
 		CronSchedule(defaultSchedule),
 		imageFinder,
+		NewPeriodicReconcileUpdateScheduleTrigger(30*time.Second),
 	), nil
 }
 
-func NewCronImageWatcher(lister ApplicationLister, defaultSchedule CronSchedule, imageFinder ImageFinder) *cronImageWatcher {
+func NewCronImageWatcher(lister ApplicationLister, defaultSchedule CronSchedule, imageFinder ImageFinder, scheduleReconcileTrigger ReconcileUpdateScheduleTrigger) *cronImageWatcher {
 	scheduler := gocron.NewScheduler(time.Local)
 	scheduler.SingletonModeAll()
 	scheduler.WaitForScheduleAll()
@@ -39,26 +40,26 @@ func NewCronImageWatcher(lister ApplicationLister, defaultSchedule CronSchedule,
 	})
 
 	return &cronImageWatcher{
-		lister:            lister,
-		defaultSchedule:   defaultSchedule,
-		scheduler:         scheduler,
-		reconcileInterval: 30 * time.Second,
-		jobCache:          NewInMemoryJobCache(),
-		imageCache:        NewInMemoryImageCache(),
-		updateChan:        make(chan *yarotskymev1alpha1.Application),
-		imageFinder:       imageFinder,
+		lister:                   lister,
+		defaultSchedule:          defaultSchedule,
+		scheduler:                scheduler,
+		scheduleReconcileTrigger: scheduleReconcileTrigger,
+		jobCache:                 NewInMemoryJobCache(),
+		imageCache:               NewInMemoryImageCache(),
+		updateChan:               make(chan *yarotskymev1alpha1.Application),
+		imageFinder:              imageFinder,
 	}
 }
 
 type cronImageWatcher struct {
-	lister            ApplicationLister
-	defaultSchedule   CronSchedule
-	scheduler         *gocron.Scheduler
-	reconcileInterval time.Duration
-	jobCache          JobCache
-	imageCache        ImageCache
-	updateChan        chan *yarotskymev1alpha1.Application
-	imageFinder       ImageFinder
+	lister                   ApplicationLister
+	defaultSchedule          CronSchedule
+	scheduler                *gocron.Scheduler
+	scheduleReconcileTrigger ReconcileUpdateScheduleTrigger
+	jobCache                 JobCache
+	imageCache               ImageCache
+	updateChan               chan *yarotskymev1alpha1.Application
+	imageFinder              ImageFinder
 }
 
 func (w *cronImageWatcher) WatchForNewImages(ctx context.Context, c chan event.GenericEvent) {
@@ -68,7 +69,8 @@ func (w *cronImageWatcher) WatchForNewImages(ctx context.Context, c chan event.G
 		select {
 		case <-ctx.Done():
 			w.stop(ctx)
-		case <-time.After(w.reconcileInterval): // TODO: ideally, every time we see a create/delete or ImageSpec change
+			return
+		case <-w.scheduleReconcileTrigger.ReconcileUpdateSchedule():
 			w.reconcileSchedules(ctx)
 		case app := <-w.updateChan:
 			c <- event.GenericEvent{Object: app}
@@ -157,7 +159,7 @@ func (w *cronImageWatcher) reconcileSchedules(ctx context.Context) {
 func (w *cronImageWatcher) scheduleUpdateCheck(ctx context.Context, app *yarotskymev1alpha1.Application) (*Job, error) {
 	appSchedule := w.schedule(app.Spec.Image)
 
-	job, err := w.scheduler.Cron(string(appSchedule)).Tag(appName(app).String(), string(appSchedule)).DoWithJobDetails(w.enqueueReconciliation, ctx, app)
+	job, err := w.scheduler.Cron(string(appSchedule)).Tag(appName(app).String(), string(appSchedule)).DoWithJobDetails(w.enqueueReconciliation, ctx, app.DeepCopy())
 	if err != nil {
 		return nil, fmt.Errorf("failed to schedule update check for app %s: %w", appName(app), err)
 	}
@@ -200,3 +202,19 @@ var _ ImageFinder = &cronImageWatcher{}
 func appName(app *yarotskymev1alpha1.Application) types.NamespacedName {
 	return types.NamespacedName{Namespace: app.Namespace, Name: app.Name}
 }
+
+type periodicReconcileUpdateScheduleTrigger struct {
+	interval time.Duration
+}
+
+func NewPeriodicReconcileUpdateScheduleTrigger(interval time.Duration) *periodicReconcileUpdateScheduleTrigger {
+	return &periodicReconcileUpdateScheduleTrigger{
+		interval: interval,
+	}
+}
+
+func (t *periodicReconcileUpdateScheduleTrigger) ReconcileUpdateSchedule() <-chan time.Time {
+	return time.After(t.interval)
+}
+
+var _ ReconcileUpdateScheduleTrigger = &periodicReconcileUpdateScheduleTrigger{}
