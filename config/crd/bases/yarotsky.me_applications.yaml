@@ -205,6 +205,10 @@ spec:
                     required:
                     - constraint
                     type: object
+                  updateSchedule:
+                    description: 'Cron-like expression determining update check schedule.
+                      Ref: https://en.wikipedia.org/wiki/Cron'
+                    type: string
                   versionStrategy:
                     description: Version selection strategy, e.g. `Digest`.
                     enum:

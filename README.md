@@ -15,12 +15,12 @@
 - [X] Garbage-collect `ClusterRoleBinding` objects (they cannot be auto-removed via ownership relationship).
 - [X] Automatically update docker images of Applications (semver).
 - [X] Add `app` short name
-- [ ] Ensure we don't hammer the image registry on errors (requeue reconciliation with increased interval)
-- [ ] Make image checking interval configurable
+- [X] Ensure we don't hammer the image registry on errors (requeue reconciliation with increased interval) - solved via caching image refs
+- [ ] Support different update schedules
+  - [X] Allow Applications to pick a particular update schedule
+  - [ ] Allow choosing a default one
 - [ ] Update README
-- [ ] Create an Update Schedule CR (cluster-wide)
-  - [ ] Allow choosing a default one via annotation
-  - [ ] Allow Applications to pick a particular update schedule
+- [ ] Validating admission webhook?
 
 ## Description
 // TODO(user): An in-depth paragraph about your project and overview of use

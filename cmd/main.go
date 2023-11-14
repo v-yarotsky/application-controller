@@ -120,12 +120,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	imageWatcher := images.NewCronImageWatcher(
+		mgr.GetClient(),
+		images.CronSchedule("*/5 * * * *"),
+		imageFinder,
+	)
+
 	imageUpdateEvents := make(chan event.GenericEvent)
 
 	if err = (&controller.ApplicationReconciler{
 		Client:                    mgr.GetClient(),
 		Scheme:                    mgr.GetScheme(),
-		ImageFinder:               imageFinder,
+		ImageFinder:               imageWatcher,
 		ImageUpdateEvents:         imageUpdateEvents,
 		DefaultIngressClassName:   ingressClass,
 		DefaultIngressAnnotations: ingressAnnotations,
@@ -149,8 +155,7 @@ func main() {
 	ctx := ctrl.SetupSignalHandler()
 
 	setupLog.Info("starting application update watcher")
-	applicationWatcher := images.NewSillyImageWatcher(mgr.GetClient())
-	go applicationWatcher.WatchForNewImages(ctx, imageUpdateEvents)
+	go imageWatcher.WatchForNewImages(ctx, imageUpdateEvents)
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctx); err != nil {

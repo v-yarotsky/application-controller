@@ -134,6 +134,10 @@ type ImageSpec struct {
 	// OCI Image repository.
 	Repository string `json:"repository"`
 
+	// Cron-like expression determining update check schedule.
+	// Ref: https://en.wikipedia.org/wiki/Cron
+	UpdateSchedule *string `json:"updateSchedule,omitempty"`
+
 	// Version selection strategy, e.g. `Digest`.
 	// +kubebuilder:validation:Enum=Digest;SemVer
 	VersionStrategy VersionStrategy            `json:"versionStrategy"`
