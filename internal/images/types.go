@@ -23,14 +23,6 @@ type ApplicationLister interface {
 	ListApplications(ctx context.Context) ([]yarotskymev1alpha1.Application, error)
 }
 
-type ImageCache interface {
-	Get(spec yarotskymev1alpha1.ImageSpec) *ImageRef
-	Set(spec yarotskymev1alpha1.ImageSpec, ref ImageRef)
-	Delete(spec yarotskymev1alpha1.ImageSpec)
-	KeepOnly(specs ...yarotskymev1alpha1.ImageSpec) []ImageRef
-	Len() int
-}
-
 type RegistryClient interface {
 	// ListTags lists tags for a given repository.
 	// Per spec[^1], tags are returned in lexicographical order.
