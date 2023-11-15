@@ -3,7 +3,6 @@ package images
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
@@ -34,7 +33,7 @@ func NewCronImageWatcherWithDefaults(client client.Client, defaultSchedule strin
 
 func NewCronImageWatcher(lister ApplicationLister, scheduler Scheduler, imageFinder ImageFinder, scheduleReconcileTrigger ReconcileUpdateScheduleTrigger) *cronImageWatcher {
 	return &cronImageWatcher{
-		imageCache:               NewInMemoryImageCache(),
+		imageCache:               NewCache[ImageSpecKeyType, ImageRef](),
 		imageFinder:              imageFinder,
 		lister:                   lister,
 		scheduleReconcileTrigger: scheduleReconcileTrigger,
@@ -44,7 +43,7 @@ func NewCronImageWatcher(lister ApplicationLister, scheduler Scheduler, imageFin
 }
 
 type cronImageWatcher struct {
-	imageCache               ImageCache
+	imageCache               *cache[ImageSpecKeyType, ImageRef]
 	imageFinder              ImageFinder
 	lister                   ApplicationLister
 	scheduleReconcileTrigger ReconcileUpdateScheduleTrigger
@@ -70,7 +69,7 @@ func (w *cronImageWatcher) WatchForNewImages(ctx context.Context, c chan event.G
 func (w *cronImageWatcher) FindImage(ctx context.Context, spec yarotskymev1alpha1.ImageSpec) (*ImageRef, error) {
 	log := log.FromContext(ctx).WithValues("repo", spec.Repository)
 
-	cached := w.imageCache.Get(spec)
+	cached := w.imageCache.Get(ImageSpecKey(spec))
 	if cached != nil {
 		log.WithValues("image", cached).Info("found cached image")
 		return cached, nil
@@ -84,7 +83,7 @@ func (w *cronImageWatcher) FindImage(ctx context.Context, spec yarotskymev1alpha
 		return nil, err
 	}
 	log.WithValues("image", imgRef).Info("Caching image")
-	w.imageCache.Set(spec, *imgRef)
+	w.imageCache.Set(ImageSpecKey(spec), *imgRef)
 	return imgRef, nil
 }
 
@@ -98,10 +97,10 @@ func (w *cronImageWatcher) reconcileSchedules(ctx context.Context) {
 		return
 	}
 
-	seenImageSpecs := make([]yarotskymev1alpha1.ImageSpec, 0, len(apps))
+	seenImageSpecKeys := make([]ImageSpecKeyType, 0, len(apps))
 
 	for _, app := range apps {
-		seenImageSpecs = append(seenImageSpecs, app.Spec.Image)
+		seenImageSpecKeys = append(seenImageSpecKeys, ImageSpecKey(app.Spec.Image))
 		if err := w.scheduler.UpsertJob(app, w.enqueueReconciliation); err != nil {
 			log.Error(err, "failed to upsert update check job")
 		}
@@ -109,7 +108,7 @@ func (w *cronImageWatcher) reconcileSchedules(ctx context.Context) {
 
 	w.scheduler.KeepJobs(apps)
 
-	prunedImageRefs := w.imageCache.KeepOnly(seenImageSpecs...)
+	prunedImageRefs := w.imageCache.KeepOnly(seenImageSpecKeys...)
 	if len(prunedImageRefs) > 0 {
 		log.WithValues("prunedImageRefs", len(prunedImageRefs)).Info("Pruned image cache")
 	}
@@ -119,7 +118,7 @@ func (w *cronImageWatcher) enqueueReconciliation(ctx context.Context, app *yarot
 	log := log.FromContext(ctx)
 
 	log.Info("Clearing cached image")
-	w.imageCache.Delete(app.Spec.Image)
+	w.imageCache.Delete(ImageSpecKey(app.Spec.Image))
 
 	log.Info("Scheduling reconciliation to check for image updates")
 	w.updateChan <- app
@@ -158,8 +157,7 @@ type jobHandle struct {
 type cronScheduler struct {
 	ctx             context.Context
 	defaultSchedule CronSchedule
-	jobs            map[string]jobHandle
-	lock            sync.RWMutex
+	jobs            *cache[string, jobHandle]
 	log             logr.Logger
 	scheduler       *gocron.Scheduler
 	isStarted       bool
@@ -172,8 +170,7 @@ func NewCronScheduler(defaultSchedule CronSchedule) *cronScheduler {
 
 	return &cronScheduler{
 		defaultSchedule: defaultSchedule,
-		jobs:            make(map[string]jobHandle),
-		lock:            sync.RWMutex{},
+		jobs:            NewCache[string, jobHandle](),
 		scheduler:       scheduler,
 	}
 }
@@ -206,11 +203,9 @@ func (s *cronScheduler) UpsertJob(app yarotskymev1alpha1.Application, fn AppJobF
 
 	log := s.log.WithValues("key", key, "schedule", schedule)
 
-	s.lock.RLock()
-	handle, ok := s.jobs[key]
-	s.lock.RUnlock()
+	handle := s.jobs.Get(key)
 
-	if ok {
+	if handle != nil {
 		if handle.schedule == schedule {
 			log.Info("No changes to existing schedule")
 			return nil
@@ -226,9 +221,7 @@ func (s *cronScheduler) UpsertJob(app yarotskymev1alpha1.Application, fn AppJobF
 		return fmt.Errorf("failed to schedule update check %s: %w", key, err)
 	}
 
-	s.lock.Lock()
-	s.jobs[key] = jobHandle{schedule: schedule, gocronJob: gocronJob}
-	s.lock.Unlock()
+	s.jobs.Set(key, jobHandle{schedule: schedule, gocronJob: gocronJob})
 
 	return nil
 }
@@ -236,30 +229,16 @@ func (s *cronScheduler) UpsertJob(app yarotskymev1alpha1.Application, fn AppJobF
 func (s *cronScheduler) KeepJobs(apps []yarotskymev1alpha1.Application) {
 	log := s.log
 
-	keepSet := make(map[string]bool, len(apps))
-
-	for _, app := range apps {
-		keepSet[s.key(&app)] = true
+	keys := make([]string, len(apps))
+	for i, app := range apps {
+		keys[i] = s.key(&app)
 	}
 
-	discard := make([]string, 0, len(apps))
+	discarded := s.jobs.KeepOnly(keys...)
 
-	s.lock.RLock()
-	for k := range s.jobs {
-		if keepSet[k] {
-			continue
-		}
-		discard = append(discard, k)
-	}
-	s.lock.RUnlock()
-
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	for _, k := range discard {
-		h := s.jobs[k]
+	for k, h := range discarded {
 		log.WithValues("key", k, "schedule", h.schedule).Info("Unscheduling job")
-		delete(s.jobs, k)
+		s.scheduler.RemoveByReference(h.gocronJob)
 	}
 }
 
