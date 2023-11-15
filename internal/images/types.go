@@ -2,7 +2,6 @@ package images
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"time"
 
@@ -58,11 +57,4 @@ type Scheduler interface {
 	Start(ctx context.Context)
 	UpsertJob(app yarotskymev1alpha1.Application, fn AppJobFn) error
 	KeepJobs(apps []yarotskymev1alpha1.Application)
-}
-
-type ImageSpecKeyType string
-
-func ImageSpecKey(spec yarotskymev1alpha1.ImageSpec) ImageSpecKeyType {
-	keyBytes, _ := json.Marshal(spec)
-	return ImageSpecKeyType(keyBytes)
 }

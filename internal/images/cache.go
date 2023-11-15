@@ -4,15 +4,19 @@ import (
 	"sync"
 )
 
-func NewCache[K comparable, V any]() *cache[K, V] {
+type CacheKeyer interface {
+	CacheKey() string
+}
+
+func NewCache[K CacheKeyer, V any]() *cache[K, V] {
 	return &cache[K, V]{
-		cache: make(map[K]V),
+		cache: make(map[string]V),
 		lock:  sync.RWMutex{},
 	}
 }
 
-type cache[K comparable, V any] struct {
-	cache map[K]V
+type cache[K CacheKeyer, V any] struct {
+	cache map[string]V
 	lock  sync.RWMutex
 }
 
@@ -20,7 +24,7 @@ func (c *cache[K, V]) Get(key K) *V {
 	c.lock.RLock()
 	defer c.lock.RUnlock()
 
-	if result, ok := c.cache[key]; ok {
+	if result, ok := c.cache[key.CacheKey()]; ok {
 		return &result
 	}
 	return nil
@@ -30,26 +34,26 @@ func (c *cache[K, V]) Set(key K, value V) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	c.cache[key] = value
+	c.cache[key.CacheKey()] = value
 }
 
 func (c *cache[K, V]) Delete(key K) {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	delete(c.cache, key)
+	delete(c.cache, key.CacheKey())
 }
 
-func (c *cache[K, V]) KeepOnly(keys ...K) map[K]V {
+func (c *cache[K, V]) KeepOnly(keys ...K) map[string]V {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 
-	seen := make(map[K]bool, len(keys))
+	seen := make(map[string]bool, len(keys))
 	for _, key := range keys {
-		seen[key] = true
+		seen[key.CacheKey()] = true
 	}
 
-	unwantedKeys := make([]K, 0, len(keys))
+	unwantedKeys := make([]string, 0, len(keys))
 	for k := range c.cache {
 		if seen[k] {
 			continue
@@ -57,7 +61,7 @@ func (c *cache[K, V]) KeepOnly(keys ...K) map[K]V {
 		unwantedKeys = append(unwantedKeys, k)
 	}
 
-	pruned := make(map[K]V, len(unwantedKeys))
+	pruned := make(map[string]V, len(unwantedKeys))
 	for _, k := range unwantedKeys {
 		pruned[k] = c.cache[k]
 		delete(c.cache, k)
