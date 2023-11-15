@@ -249,6 +249,7 @@ func (s *cronScheduler) KeepJobs(apps []yarotskymev1alpha1.Application) {
 
 	keys := make([]jobKey, len(apps))
 	for i, app := range apps {
+		app := app
 		keys[i] = jobKey{&app}
 	}
 

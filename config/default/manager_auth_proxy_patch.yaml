@@ -42,3 +42,5 @@ spec:
         - "--ingress-annotations"
         - >
           { "traefik.ingress.kubernetes.io/router.middlewares": "kube-system-https-redirect@kubernetescrd" }
+        - "--default-update-schedule"
+        - "0 11 * * *"
