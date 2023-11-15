@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
@@ -105,7 +106,7 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).ToNot(HaveOccurred())
 
-	watcher, err := images.NewCronImageWatcherWithDefaults(k8sManager.GetClient(), "@every 1s", nil, time.Second)
+	watcher, err := images.NewCronImageWatcherWithDefaults(k8sManager.GetClient(), "@every 500ms", nil, 500*time.Millisecond)
 	Expect(err).ToNot(HaveOccurred())
 
 	imageUpdateEvents = make(chan event.GenericEvent)
@@ -123,7 +124,8 @@ var _ = BeforeSuite(func() {
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 
-	go watcher.WatchForNewImages(ctx, imageUpdateEvents)
+	ctxWithLog := log.IntoContext(ctx, logf.Log)
+	go watcher.WatchForNewImages(ctxWithLog, imageUpdateEvents)
 
 	go func() {
 		defer GinkgoRecover()

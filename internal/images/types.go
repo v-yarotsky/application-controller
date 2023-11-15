@@ -6,8 +6,6 @@ import (
 	"time"
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
-	"github.com/go-co-op/gocron"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
@@ -33,14 +31,6 @@ type ImageCache interface {
 	Len() int
 }
 
-type JobCache interface {
-	Get(appName types.NamespacedName) *Job
-	Set(appName types.NamespacedName, job *Job)
-	Delete(appName types.NamespacedName)
-	KeepOnly(appNames ...types.NamespacedName) []*Job
-	Len() int
-}
-
 type RegistryClient interface {
 	// ListTags lists tags for a given repository.
 	// Per spec[^1], tags are returned in lexicographical order.
@@ -56,11 +46,15 @@ type ReconcileUpdateScheduleTrigger interface {
 }
 
 type CronSchedule string
-type Job struct {
-	Schedule CronSchedule
-	CronJob  *gocron.Job
-}
 
 var (
 	ErrNotFound = errors.New("Suitable image not found")
 )
+
+type AppJobFn func(ctx context.Context, app *yarotskymev1alpha1.Application)
+
+type Scheduler interface {
+	Start(ctx context.Context)
+	UpsertJob(app yarotskymev1alpha1.Application, fn AppJobFn) error
+	KeepJobs(apps []yarotskymev1alpha1.Application)
+}
