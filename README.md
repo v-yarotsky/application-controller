@@ -20,6 +20,8 @@
   - [X] Allow Applications to pick a particular update schedule
   - [X] Allow choosing a default one
 - [ ] Update README
+- [ ] Add prometheus metrics
+- [ ] Fix some remaining race conditions
 - [ ] Validating admission webhook?
 
 ## Description
