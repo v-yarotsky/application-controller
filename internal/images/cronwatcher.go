@@ -32,7 +32,7 @@ func (t jobKey) CacheKey() string {
 	return types.NamespacedName{Namespace: t.Namespace, Name: t.Name}.String()
 }
 
-func NewCronImageWatcherWithDefaults(client client.Client, defaultSchedule string, imagePullSecrets []string, scheduleReconcileInterval time.Duration) (*cronImageWatcher, error) {
+func NewCronImageWatcherWithDefaults(client client.Client, defaultSchedule CronSchedule, imagePullSecrets []string, scheduleReconcileInterval time.Duration) (*cronImageWatcher, error) {
 	imageFinder, err := NewImageFinder(
 		WithAuthenticatedRegistryClient(imagePullSecrets),
 	)
@@ -43,7 +43,7 @@ func NewCronImageWatcherWithDefaults(client client.Client, defaultSchedule strin
 	lister := NewSimpleApplicationLister(client)
 	return NewCronImageWatcher(
 		lister,
-		NewCronScheduler(CronSchedule(defaultSchedule)),
+		NewCronScheduler(defaultSchedule),
 		imageFinder,
 		NewPeriodicReconcileUpdateScheduleTrigger(scheduleReconcileInterval),
 	), nil

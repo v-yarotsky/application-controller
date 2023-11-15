@@ -126,7 +126,6 @@ func TestCronImageWatcher(t *testing.T) {
 	assert.Equal(t, 1, finder.RepositoryCallCount(app2.Spec.Image.Repository))
 
 	// Allows new lookups on scheduled update
-
 	wait = scheduler.RunAllScheduledJobsNow()
 	wait()
 

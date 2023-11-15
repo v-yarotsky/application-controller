@@ -16,9 +16,9 @@
 - [X] Automatically update docker images of Applications (semver).
 - [X] Add `app` short name
 - [X] Ensure we don't hammer the image registry on errors (requeue reconciliation with increased interval) - solved via caching image refs
-- [ ] Support different update schedules
+- [X] Support different update schedules
   - [X] Allow Applications to pick a particular update schedule
-  - [ ] Allow choosing a default one
+  - [X] Allow choosing a default one
 - [ ] Update README
 - [ ] Validating admission webhook?
 

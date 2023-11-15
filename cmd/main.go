@@ -61,6 +61,7 @@ func main() {
 	var enableLeaderElection bool
 	var probeAddr string
 	var imagePullSecrets flagext.StringSlice
+	var defaultUpdateSchedule flagext.CronSchedule = "*/5 * * * * *"
 	var ingressClass string
 	var ingressAnnotations flagext.JSONStringMap
 
@@ -72,6 +73,8 @@ func main() {
 	flag.Var(&imagePullSecrets, "image-pull-secret", "name of a Secret with image registry credentials.")
 	flag.StringVar(&ingressClass, "ingress-class", "", "Default IngressClass.")
 	flag.Var(&ingressAnnotations, "ingress-annotations", "JSON object with default Ingress annotations.")
+	flag.Var(&defaultUpdateSchedule, "default-update-schedule", "Default Cron schedule for image update checks (default: `@every 5m`);"+
+		" See https://pkg.go.dev/github.com/robfig/cron#hdr-CRON_Expression_Format")
 
 	opts := zap.Options{
 		Development: true,
@@ -115,7 +118,7 @@ func main() {
 
 	imageWatcher, err := images.NewCronImageWatcherWithDefaults(
 		mgr.GetClient(),
-		"*/5 * * * *",
+		defaultUpdateSchedule.Get(),
 		imagePullSecrets,
 		30*time.Second,
 	)
