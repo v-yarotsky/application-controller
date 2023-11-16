@@ -4,22 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"git.home.yarotsky.me/vlad/application-controller/internal/metrics"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 var _ RegistryClient = &simpleRegistryClient{}
-
-var (
-	ImageLookups = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "image_lookups_total",
-			Help: "Number image lookups performed",
-		},
-		[]string{"registry", "repository", "method", "success"},
-	)
-)
 
 type simpleRegistryClient struct {
 	extraOpts []remote.Option
@@ -55,7 +44,7 @@ func (c *simpleRegistryClient) instrumentLookup(ref ImageRef, method string, err
 	if err != nil {
 		successLabel = "false"
 	}
-	ImageLookups.WithLabelValues(
+	metrics.ImageRegistryCalls.WithLabelValues(
 		imageContext.RegistryStr(),
 		imageContext.RepositoryStr(),
 		method, successLabel,
