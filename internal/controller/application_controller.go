@@ -52,7 +52,8 @@ import (
 )
 
 const (
-	Name = "application-controller"
+	Name                          = "application-controller"
+	ExternalDNSHostnameAnnotation = "external-dns.alpha.kubernetes.io/hostname"
 
 	EventClusterRoleBindingCreated      = "ClusterRoleBindingCreated"
 	EventClusterRoleBindingUpdated      = "ClusterRoleBindingUpdated"
@@ -84,6 +85,10 @@ const (
 	EventServiceCreated      = "ServiceCreated"
 	EventServiceUpdated      = "ServiceUpdated"
 	EventServiceUpsertFailed = "ServiceUpsertFailed"
+
+	EventLBServiceCreated      = "LoadBalancerServiceCreated"
+	EventLBServiceUpdated      = "LoadBalancerServiceUpdated"
+	EventLBServiceUpsertFailed = "LoadBalancerServiceUpsertFailed"
 
 	EventPodMonitorCreated      = "PodMonitorCreated"
 	EventPodMonitorUpdated      = "PodMonitorUpdated"
@@ -194,6 +199,10 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	if err := r.ensureService(ctx, &app, namer); err != nil {
 		return r.updateStatusWithError(ctx, &app, err, EventServiceUpsertFailed)
+	}
+
+	if err := r.ensureLBService(ctx, &app, namer); err != nil {
+		return r.updateStatusWithError(ctx, &app, err, EventLBServiceUpsertFailed)
 	}
 
 	if err := r.ensurePodMonitor(ctx, &app, namer); err != nil {
@@ -582,6 +591,72 @@ func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotsky
 	return nil
 }
 
+func (r *ApplicationReconciler) ensureLBService(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+	log := log.FromContext(ctx)
+	lb := app.Spec.LoadBalancer
+
+	if lb == nil {
+		log.Info("Application does not specify a loadBalancer; skipping.")
+		return nil
+	}
+
+	name := namer.LBServiceName()
+	log = log.WithValues("lbservicename", name.String())
+
+	svc := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name.Name,
+			Namespace: name.Namespace,
+		},
+	}
+
+	appPortsByName := make(map[string]corev1.ContainerPort, len(app.Spec.Ports))
+	for _, port := range app.Spec.Ports {
+		appPortsByName[port.Name] = port
+	}
+	ports := make([]corev1.ServicePort, 0, len(lb.PortNames))
+	for _, n := range lb.PortNames {
+		if p, ok := appPortsByName[n]; !ok {
+			return fmt.Errorf("loadBalancer specifies an unknown port name %q", n)
+		} else {
+			ports = append(ports, corev1.ServicePort{
+				Name:       p.Name,
+				TargetPort: intstr.FromString(p.Name),
+				Protocol:   p.Protocol,
+				Port:       p.ContainerPort,
+			})
+		}
+	}
+
+	result, err := controllerutil.CreateOrPatch(ctx, r.Client, &svc, func() error {
+		svc.Annotations = addToMap[string, string](svc.Annotations, ExternalDNSHostnameAnnotation, lb.Host)
+		svc.Spec.Type = corev1.ServiceTypeLoadBalancer
+		svc.Spec.Ports = ports
+		svc.Spec.Selector = namer.SelectorLabels()
+		if err := controllerutil.SetControllerReference(app, &svc, r.Scheme); err != nil {
+			log.Error(err, "failed to set controller reference on Service")
+			return err
+		}
+		return nil
+	})
+
+	if err != nil {
+		log.Error(err, "failed to create/update the LoadBalancerService")
+		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventLBServiceUpsertFailed, "Could not upsert LoadBalancerService %s: %s", name, err)
+		return fmt.Errorf("failed to upsert LoadBalancerService %s: %w", name, err)
+	}
+
+	switch result {
+	case controllerutil.OperationResultCreated:
+		log.Info("Created LoadBalancerService")
+		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventLBServiceCreated, "LoadBalancerService %s has been created", name)
+	case controllerutil.OperationResultUpdated:
+		log.Info("Updated LoadBalancerService")
+		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventLBServiceUpdated, "LoadBalancerService %s has been updated", name)
+	}
+	return nil
+}
+
 func (r *ApplicationReconciler) ensurePodMonitor(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	log := log.FromContext(ctx)
 
@@ -904,4 +979,12 @@ func (r *ApplicationReconciler) updateStatusWithError(ctx context.Context, app *
 	})
 	result, statusErr := r.updateStatus(ctx, app)
 	return result, errors.Join(err, statusErr)
+}
+
+func addToMap[K comparable, V any](m map[K]V, key K, value V) map[K]V {
+	if m == nil {
+		m = make(map[K]V)
+	}
+	m[key] = value
+	return m
 }

@@ -70,15 +70,21 @@ spec:
     containerPort: 8080
   - name: "metrics"
     containerPort: 8192
+  - name: "listen-udp"
+    protocol: "UDP"
+    containerPort: 22000
   ingress:
     # Ingress annotations can be set via `--ingress-annotations`.
     host: "dashboard.home.yarotsky.me"
     ingressClassName: "nginx-private"  # default can be set via `--ingress-class`
-    port: "http"                       # defaults to `"web" `or `"http" `if present in `.spec.ports`
+    portName: "http"                   # defaults to `"web" `or `"http" `if present in `.spec.ports`
+  loadBalancer:
+    host: "udp.home.yarotsky.me"
+    portNames: ["listen-udp"]
   metrics:
     enabled: true
-    port: "metrics"   # defaults to `"metrics"` or `"prometheus" `if present in `.spec.ports`
-    path: "/metrics"  # defaults to `"/metrics"`
+    portName: "metrics"  # defaults to `"metrics"` or `"prometheus" `if present in `.spec.ports`
+    path: "/metrics"     # defaults to `"/metrics"`
   resources:
     requests:
       cpu: "100m"
@@ -150,6 +156,7 @@ In addition to the above metrics, the following metrics are instrumented:
   - [X] Allow choosing a default one
 - [X] Update README
 - [X] Add prometheus metrics
+- [ ] Prune Ingress, Service (LoadBalancer) when `ingress` or `loadBalancer` are removed.
 - [ ] Fix some remaining race conditions
 - [ ] Validating admission webhook? Or at least write tests to make sure we have nice error messages
 

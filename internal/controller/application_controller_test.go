@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -54,10 +55,19 @@ var _ = Describe("Application controller", func() {
 						Name:          "http",
 						Protocol:      corev1.ProtocolTCP,
 					},
+					{
+						ContainerPort: 22000,
+						Name:          "listen-udp",
+						Protocol:      corev1.ProtocolUDP,
+					},
 				},
 				Ingress: &yarotskymev1alpha1.Ingress{
 					IngressClassName: ptr.To("traefik"),
 					Host:             "dashboard.home.yarotsky.me",
+				},
+				LoadBalancer: &yarotskymev1alpha1.LoadBalancer{
+					Host:      "endpoint.home.yarotsky.me",
+					PortNames: []string{"listen-udp"},
 				},
 				Roles: []yarotskymev1alpha1.ScopedRoleRef{
 					{
@@ -185,8 +195,11 @@ var _ = Describe("Application controller", func() {
 
 			mainContainer := deploy.Spec.Template.Spec.Containers[0]
 			g.Expect(mainContainer.Image).To(Equal(imageRef.String()))
-			g.Expect(mainContainer.Ports).To(HaveLen(1))
-			g.Expect(mainContainer.Ports).To(ContainElement(corev1.ContainerPort{ContainerPort: 8080, Name: "http", Protocol: corev1.ProtocolTCP}))
+			g.Expect(mainContainer.Ports).To(HaveLen(2))
+			g.Expect(mainContainer.Ports).To(ContainElements(
+				corev1.ContainerPort{ContainerPort: 8080, Name: "http", Protocol: corev1.ProtocolTCP},
+				corev1.ContainerPort{ContainerPort: 22000, Name: "listen-udp", Protocol: corev1.ProtocolUDP},
+			))
 			g.Expect(mainContainer.VolumeMounts).To(ContainElement(corev1.VolumeMount{
 				Name:      "data",
 				MountPath: "/data",
@@ -240,6 +253,31 @@ var _ = Describe("Application controller", func() {
 						},
 					},
 				},
+			}))
+		})
+
+		By("Creating a LoadBalancer service")
+		lbServiceName := mkName(app.Namespace, fmt.Sprintf("%s-loadbalancer", app.Name))
+		var lbService corev1.Service
+		EventuallyGetObject(ctx, lbServiceName, &lbService, func(g Gomega) {
+			g.Expect(lbService.Annotations).To(HaveKeyWithValue(
+				"external-dns.alpha.kubernetes.io/hostname",
+				"endpoint.home.yarotsky.me",
+			))
+
+			g.Expect(lbService.Spec.Ports).To(ContainElement(
+				SatisfyAll(
+					HaveField("Name", "listen-udp"),
+					HaveField("TargetPort", intstr.FromString("listen-udp")),
+					HaveField("Protocol", corev1.ProtocolUDP),
+					HaveField("Port", int32(22000)),
+				),
+			))
+
+			g.Expect(lbService.Spec.Selector).To(Equal(map[string]string{
+				"app.kubernetes.io/name":       app.Name,
+				"app.kubernetes.io/managed-by": "application-controller",
+				"app.kubernetes.io/instance":   "default",
 			}))
 		})
 	}, SpecTimeout(5*time.Second))

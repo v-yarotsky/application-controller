@@ -396,6 +396,26 @@ spec:
                     format: int32
                     type: integer
                 type: object
+              loadBalancer:
+                description: LoadBalancer creates a separate Service with type LoadBalancer,
+                  and exposes specified ports. It supports creating a DNS record via
+                  an external-dns annotation, the value of which is controlled with
+                  the `host` field.
+                properties:
+                  host:
+                    description: 'host is the fully qualified domain name of a network
+                      host, as defined by RFC 3986. Note the following deviations
+                      from the "host" part of the URI as defined in RFC 3986: 1. IPs
+                      are not allowed. 2. Ports are not allowed.'
+                    type: string
+                  portNames:
+                    items:
+                      type: string
+                    minItems: 1
+                    type: array
+                required:
+                - host
+                type: object
               metrics:
                 properties:
                   enabled:

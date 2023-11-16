@@ -12,5 +12,15 @@ spec:
   ports:
   - name: "http"
     containerPort: 8080
+  - name: "metrics"
+    containerPort: 8192
+  - name: "listener-tcp"
+    containerPort: 22000
+  - name: "listener-udp"
+    containerPort: 22000
+    protocol: "UDP"
   ingress:
     host: "dashboard.home.yarotsky.me"
+  loadBalancer:
+    host: "things.home.yarotsky.me"
+    ports: ["listener-tcp", "listener-udp"]

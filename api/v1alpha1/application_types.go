@@ -119,6 +119,13 @@ type ApplicationSpec struct {
 	// +optional
 	Ingress *Ingress `json:"ingress,omitempty"`
 
+	// LoadBalancer creates a separate Service with type LoadBalancer,
+	// and exposes specified ports. It supports creating a DNS record
+	// via an external-dns annotation, the value of which is controlled
+	// with the `host` field.
+	// +optional
+	LoadBalancer *LoadBalancer `json:"loadBalancer,omitempty"`
+
 	// +optional
 	Metrics *Metrics `json:"metrics,omitempty"`
 
@@ -242,6 +249,18 @@ type Ingress struct {
 
 	// Guesses `web` or `http` by default.
 	PortName string `json:"portName,omitempty"`
+}
+
+type LoadBalancer struct {
+	// host is the fully qualified domain name of a network host, as defined by RFC 3986.
+	// Note the following deviations from the "host" part of the
+	// URI as defined in RFC 3986:
+	// 1. IPs are not allowed.
+	// 2. Ports are not allowed.
+	Host string `json:"host"`
+
+	// +kubebuilder:validation:MinItems=1
+	PortNames []string `json:"portNames,omitempty"`
 }
 
 type Metrics struct {
