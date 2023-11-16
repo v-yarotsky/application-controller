@@ -1,27 +1,16 @@
 apiVersion: yarotsky.me/v1alpha1
 kind: Application
 metadata:
-  labels:
-    app.kubernetes.io/name: application
-    app.kubernetes.io/instance: application-sample
-    app.kubernetes.io/part-of: application-controller
-    app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/created-by: application-controller
   name: application-sample
 spec:
   image:
     repository: "git.home.yarotsky.me/vlad/dashboard"
-    versionStrategy: "Digest"
-    digest:
-      tag: "v0.1.0"
+    versionStrategy: "SemVer"
+    semver:
+      constraint: "^0"
+    updateSchedule: "@every 5m"
   ports:
   - name: "http"
     containerPort: 8080
   ingress:
-    host: "dashboard2.home.yarotsky.me"
-    ingressClassName: "traefik"
-  roles:
-  - apiGroup: "rbac.authorization.k8s.io"
-    kind: "ClusterRole"
-    name: "dashboard"
-    scope: "Cluster"
+    host: "dashboard.home.yarotsky.me"

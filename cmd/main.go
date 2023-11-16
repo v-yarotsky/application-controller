@@ -70,7 +70,7 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
-	flag.Var(&imagePullSecrets, "image-pull-secret", "name of a Secret with image registry credentials.")
+	flag.Var(&imagePullSecrets, "image-pull-secret", "name of a Secret with image registry credentials. Can be used multiple times.")
 	flag.StringVar(&ingressClass, "ingress-class", "", "Default IngressClass.")
 	flag.Var(&ingressAnnotations, "ingress-annotations", "JSON object with default Ingress annotations.")
 	flag.Var(&defaultUpdateSchedule, "default-update-schedule", "Default Cron schedule for image update checks (default: `@every 5m`);"+

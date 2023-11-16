@@ -1,5 +1,134 @@
-# application-controller
-// TODO(user): Add simple overview of use/purpose
+# Application Controller
+
+Application Controller provides a simplified way of deploying and _updating_ single-container applications to
+a homelab Kubernetes cluster.
+
+## Description
+
+Application controller automatically manages the following Kubernetes resources for an Application:
+- Deployment
+- ServiceAccount
+- Service
+- Ingress
+- PodMonitor
+- RoleBinding
+- ClusterRoleBinding
+
+It automatically updates the Deployment whenever a new version of the container image becomes available.
+
+Example resource:
+
+```yaml
+apiVersion: yarotsky.me/v1alpha1
+kind: Application
+metadata:
+  name: application-sample
+spec:
+  image:
+    repository: "git.home.yarotsky.me/vlad/dashboard"
+    versionStrategy: "SemVer"
+    semver:
+      constraint: "^0"
+  ports:
+  - name: "http"
+    containerPort: 8080
+  - name: "metrics"
+    containerPort: 8192
+  ingress:
+    host: "dashboard.home.yarotsky.me"
+  metrics:
+    enabled: true
+```
+
+Expanded example:
+
+```yaml
+apiVersion: yarotsky.me/v1alpha1
+kind: Application
+metadata:
+  name: application-sample
+spec:
+  image:
+    repository: "git.home.yarotsky.me/vlad/dashboard"
+    versionStrategy: "SemVer"
+    semver:
+      constraint: "^0"
+    updateSchedule: "@every 5m"  # see https://pkg.go.dev/github.com/robfig/cron#hdr-CRON_Expression_Format;
+                                 # default can be set via `--default-update-schedule`
+  command: ["/bin/dashboard"]
+  args: ["start-server"]
+  env:
+  - name: "FOO"
+    value: "bar"
+  - name: "QUX"
+    valueFrom:
+      secretKeyRef:
+        name: "my-secret"
+        key: "my-secret-key"
+  ports:
+  - name: "http"
+    containerPort: 8080
+  - name: "metrics"
+    containerPort: 8192
+  ingress:
+    # Ingress annotations can be set via `--ingress-annotations`.
+    host: "dashboard.home.yarotsky.me"
+    ingressClassName: "nginx-private"  # default can be set via `--ingress-class`
+    port: "http"                       # defaults to `"web" `or `"http" `if present in `.spec.ports`
+  metrics:
+    enabled: true
+    port: "metrics"   # defaults to `"metrics"` or `"prometheus" `if present in `.spec.ports`
+    path: "/metrics"  # defaults to `"/metrics"`
+  resources:
+    requests:
+      cpu: "100m"
+    limits:
+      cpu: "250m"
+  livenessProbe:
+    httpGet:
+      path: "/healthz"
+  readinessProbe:
+    httpGet:
+      path: "/healthz"
+  startupProbe:
+    httpGet:
+      path: "/healthz"
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+  volumes:
+  - name: "my-volume"
+    volumeSource:
+      persistentVolumeClaim:
+        claimName: "my-pvc"
+    mountPath: "/data"
+  roles:
+  - apiGroup: "rbac.authorization.k8s.io"
+    kind: "ClusterRole"
+    name: "my-cluster-role"
+    scope: "Cluster"
+  - apiGroup: "rbac.authorization.k8s.io"
+    kind: "ClusterRole"
+    name: "my-cluster-role2"
+    scope: "Namespace"
+  - apiGroup: "rbac.authorization.k8s.io"
+    kind: "Role"
+    name: "my-role"
+```
+
+## Container Image Registry Authentication
+
+
+## Monitoring
+
+See https://book.kubebuilder.io/reference/metrics-reference.
+
+In addition to the above metrics, the following metrics are instrumented:
+
+| Name                         | Description                                   | Tags                                          |
+| ---                          | ---                                           | ---                                           |
+| `image_registry_calls_total` | Number of calls to a Container Image Registry | `registry`, `repository`, `success`, `method` |
+
 
 # TODO
 
@@ -19,13 +148,10 @@
 - [X] Support different update schedules
   - [X] Allow Applications to pick a particular update schedule
   - [X] Allow choosing a default one
-- [ ] Update README
+- [X] Update README
 - [X] Add prometheus metrics
 - [ ] Fix some remaining race conditions
 - [ ] Validating admission webhook? Or at least write tests to make sure we have nice error messages
-
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
 
 ## Getting Started
 You’ll need a Kubernetes cluster to run against. You can use [KIND](https://sigs.k8s.io/kind) to get a local cluster for testing, or run against a remote cluster.
@@ -63,9 +189,6 @@ UnDeploy the controller from the cluster:
 ```sh
 make undeploy
 ```
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
 
 ### How it works
 This project aims to follow the Kubernetes [Operator pattern](https://kubernetes.io/docs/concepts/extend-kubernetes/operator/).
