@@ -555,17 +555,18 @@ func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotsky
 		},
 	}
 
+	ports := make([]corev1.ServicePort, 0, len(app.Spec.Ports))
+	for _, p := range app.Spec.Ports {
+		ports = append(ports, corev1.ServicePort{
+			Name:       p.Name,
+			TargetPort: intstr.FromString(p.Name),
+			Protocol:   p.Protocol,
+			Port:       p.ContainerPort,
+		})
+	}
+
 	result, err := controllerutil.CreateOrPatch(ctx, r.Client, &svc, func() error {
-		ports := make([]corev1.ServicePort, 0, len(app.Spec.Ports))
-		for _, p := range app.Spec.Ports {
-			ports = append(ports, corev1.ServicePort{
-				Name:       p.Name,
-				TargetPort: intstr.FromString(p.Name),
-				Protocol:   p.Protocol,
-				Port:       p.ContainerPort,
-			})
-		}
-		svc.Spec.Ports = ports
+		svc.Spec.Ports = reconcilePorts(svc.Spec.Ports, ports)
 		svc.Spec.Selector = namer.SelectorLabels()
 		if err := controllerutil.SetControllerReference(app, &svc, r.Scheme); err != nil {
 			log.Error(err, "failed to set controller reference on Service")
@@ -631,7 +632,7 @@ func (r *ApplicationReconciler) ensureLBService(ctx context.Context, app *yarots
 	result, err := controllerutil.CreateOrPatch(ctx, r.Client, &svc, func() error {
 		svc.Annotations = addToMap[string, string](svc.Annotations, ExternalDNSHostnameAnnotation, lb.Host)
 		svc.Spec.Type = corev1.ServiceTypeLoadBalancer
-		svc.Spec.Ports = ports
+		svc.Spec.Ports = reconcilePorts(svc.Spec.Ports, ports)
 		svc.Spec.Selector = namer.SelectorLabels()
 		if err := controllerutil.SetControllerReference(app, &svc, r.Scheme); err != nil {
 			log.Error(err, "failed to set controller reference on Service")
@@ -655,6 +656,38 @@ func (r *ApplicationReconciler) ensureLBService(ctx context.Context, app *yarots
 		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventLBServiceUpdated, "LoadBalancerService %s has been updated", name)
 	}
 	return nil
+}
+
+func reconcilePorts(actual []corev1.ServicePort, desired []corev1.ServicePort) []corev1.ServicePort {
+	if len(actual) == 0 {
+		return desired
+	}
+
+	desiredPortsByName := make(map[string]corev1.ServicePort, len(desired))
+	seen := make(map[string]bool, len(desired))
+
+	for _, p := range desired {
+		desiredPortsByName[p.Name] = p
+	}
+
+	result := make([]corev1.ServicePort, 0, len(desired))
+	for _, got := range actual {
+		if want, ok := desiredPortsByName[got.Name]; ok {
+			got.TargetPort = want.TargetPort
+			got.Protocol = want.Protocol
+			result = append(result, got)
+			seen[got.Name] = true
+		}
+	}
+
+	for _, want := range desired {
+		if seen[want.Name] {
+			continue
+		}
+		result = append(result, want)
+	}
+
+	return result
 }
 
 func (r *ApplicationReconciler) ensurePodMonitor(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
