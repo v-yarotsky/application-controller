@@ -103,11 +103,8 @@ type ApplicationSpec struct {
 	// +optional
 	StartupProbe *corev1.Probe `json:"startupProbe,omitempty"`
 
-	// SecurityContext defines the security options the container should be run with.
-	// If set, the fields of SecurityContext override the equivalent fields of PodSecurityContext.
-	// More info: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/
-	// +optional
-	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
+	// PodSecurityContext holds pod-level security attributes and container settings.
+	PodSecurityContext *corev1.PodSecurityContext `json:"podSecurityContext,omitempty"`
 
 	// List of volumes to mount into the primary container.
 	// More info: https://kubernetes.io/docs/concepts/storage/volumes

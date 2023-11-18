@@ -38,6 +38,8 @@ func (f *deploymentMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.
 		podTemplateSpec := &deploy.Spec.Template.Spec
 		podTemplateSpec.ServiceAccountName = f.namer.ServiceAccountName().Name
 
+		podTemplateSpec.SecurityContext = app.Spec.PodSecurityContext
+
 		vols := make([]corev1.Volume, 0, len(app.Spec.Volumes))
 		for _, v := range app.Spec.Volumes {
 			vols = append(vols, v.Volume)
@@ -61,7 +63,6 @@ func (f *deploymentMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.
 		container.LivenessProbe = app.Spec.LivenessProbe
 		container.ReadinessProbe = app.Spec.ReadinessProbe
 		container.StartupProbe = app.Spec.StartupProbe
-		container.SecurityContext = app.Spec.SecurityContext
 
 		mounts := make([]corev1.VolumeMount, 0, len(app.Spec.Volumes))
 		for _, v := range app.Spec.Volumes {

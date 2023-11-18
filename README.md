@@ -99,7 +99,7 @@ spec:
   startupProbe:
     httpGet:
       path: "/healthz"
-  securityContext:
+  podSecurityContext:
     runAsUser: 1000
     runAsGroup: 1000
   volumes:
