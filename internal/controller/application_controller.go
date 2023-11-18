@@ -25,9 +25,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
@@ -71,6 +71,8 @@ const (
 	EventIngressCreated      = "IngressCreated"
 	EventIngressUpdated      = "IngressUpdated"
 	EventIngressUpsertFailed = "IngressUpsertFailed"
+	EventIngressDeleted      = "IngressDeleted"
+	EventIngressDeleteFailed = "IngressDeleteFailed"
 
 	EventReasonCleanup = "Cleanup"
 
@@ -89,6 +91,8 @@ const (
 	EventLBServiceCreated      = "LoadBalancerServiceCreated"
 	EventLBServiceUpdated      = "LoadBalancerServiceUpdated"
 	EventLBServiceUpsertFailed = "LoadBalancerServiceUpsertFailed"
+	EventLBServiceDeleted      = "LoadBalancerServiceDeleted"
+	EventLBServiceDeleteFailed = "LoadBalancerServiceDeleteFailed"
 
 	EventPodMonitorCreated      = "PodMonitorCreated"
 	EventPodMonitorUpdated      = "PodMonitorUpdated"
@@ -593,69 +597,27 @@ func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotsky
 }
 
 func (r *ApplicationReconciler) ensureLBService(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
-	log := log.FromContext(ctx)
-	lb := app.Spec.LoadBalancer
-
-	if lb == nil {
-		log.Info("Application does not specify a loadBalancer; skipping.")
-		return nil
+	var svc corev1.Service
+	mutator := &lbServiceMutator{
+		namer: namer,
 	}
 
-	name := namer.LBServiceName()
-	log = log.WithValues("lbservicename", name.String())
-
-	svc := corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name.Name,
-			Namespace: name.Namespace,
+	return r.ensureResource(
+		ctx,
+		app,
+		namer,
+		namer.LBServiceName(),
+		&svc,
+		mutator.Mutate(ctx, app, &svc),
+		app.Spec.LoadBalancer != nil,
+		eventMap{
+			Created:      EventLBServiceCreated,
+			Updated:      EventLBServiceUpdated,
+			UpsertFailed: EventLBServiceUpsertFailed,
+			Deleted:      EventLBServiceDeleted,
+			DeleteFailed: EventLBServiceDeleteFailed,
 		},
-	}
-
-	appPortsByName := make(map[string]corev1.ContainerPort, len(app.Spec.Ports))
-	for _, port := range app.Spec.Ports {
-		appPortsByName[port.Name] = port
-	}
-	ports := make([]corev1.ServicePort, 0, len(lb.PortNames))
-	for _, n := range lb.PortNames {
-		if p, ok := appPortsByName[n]; !ok {
-			return fmt.Errorf("loadBalancer specifies an unknown port name %q", n)
-		} else {
-			ports = append(ports, corev1.ServicePort{
-				Name:       p.Name,
-				TargetPort: intstr.FromString(p.Name),
-				Protocol:   p.Protocol,
-				Port:       p.ContainerPort,
-			})
-		}
-	}
-
-	result, err := controllerutil.CreateOrPatch(ctx, r.Client, &svc, func() error {
-		svc.Annotations = addToMap[string, string](svc.Annotations, ExternalDNSHostnameAnnotation, lb.Host)
-		svc.Spec.Type = corev1.ServiceTypeLoadBalancer
-		svc.Spec.Ports = reconcilePorts(svc.Spec.Ports, ports)
-		svc.Spec.Selector = namer.SelectorLabels()
-		if err := controllerutil.SetControllerReference(app, &svc, r.Scheme); err != nil {
-			log.Error(err, "failed to set controller reference on Service")
-			return err
-		}
-		return nil
-	})
-
-	if err != nil {
-		log.Error(err, "failed to create/update the LoadBalancerService")
-		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventLBServiceUpsertFailed, "Could not upsert LoadBalancerService %s: %s", name, err)
-		return fmt.Errorf("failed to upsert LoadBalancerService %s: %w", name, err)
-	}
-
-	switch result {
-	case controllerutil.OperationResultCreated:
-		log.Info("Created LoadBalancerService")
-		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventLBServiceCreated, "LoadBalancerService %s has been created", name)
-	case controllerutil.OperationResultUpdated:
-		log.Info("Updated LoadBalancerService")
-		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventLBServiceUpdated, "LoadBalancerService %s has been updated", name)
-	}
-	return nil
+	)
 }
 
 func reconcilePorts(actual []corev1.ServicePort, desired []corev1.ServicePort) []corev1.ServicePort {
@@ -767,122 +729,123 @@ func (r *ApplicationReconciler) ensurePodMonitor(ctx context.Context, app *yarot
 	return nil
 }
 
-func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
-	name := namer.IngressName()
-	log := log.FromContext(ctx).WithValues("ingressname", name.String())
+type eventMap struct {
+	Created      string
+	Updated      string
+	UpsertFailed string
+	Deleted      string
+	DeleteFailed string
+}
 
-	var ing networkingv1.Ingress
+func (r *ApplicationReconciler) ensureResource(
+	ctx context.Context,
+	app *yarotskymev1alpha1.Application,
+	namer Namer,
+	name types.NamespacedName,
+	obj client.Object,
+	mutateFn func() error,
+	wanted bool,
+	events eventMap,
+) error {
+	gvk, err := apiutil.GVKForObject(obj, r.Scheme)
+	if err != nil {
+		return err
+	}
+
+	log := log.FromContext(ctx).WithValues("GVK", gvk, "name", name)
+
 	found := false
-	if err := r.Client.Get(ctx, name, &ing); err != nil {
+	if err := r.Client.Get(ctx, name, obj); err != nil {
 		if !apierrors.IsNotFound(err) {
-			log.Error(err, "failed to fetch Ingress")
+			log.Error(err, "fetch failed")
 			return err
 		}
 	} else {
 		found = true
 	}
 
-	if found && !objectIsOwnedBy(&ing, app) {
-		err := fmt.Errorf("Ingress %s is not owned by the Application; refusing to reconcile!", name)
-		log.Error(err, "failed to reconcile the Ingress")
+	if found && !objectIsOwnedBy(obj, app) {
+		err := fmt.Errorf("%s %s is not owned by the Application; refusing to reconcile!", gvk, name)
+		log.Error(err, "")
 		return err
 	}
 
-	if app.Spec.Ingress != nil {
-		if !found || found && objectIsOwnedBy(&ing, app) {
-			portName := app.Spec.Ingress.PortName
-			if portName == "" {
-				for _, p := range app.Spec.Ports {
-					if p.Name == "http" {
-						portName = "http"
-						break
-					}
+	if wanted {
+		if !found || found && objectIsOwnedBy(obj, app) {
+			obj.SetName(name.Name)
+			obj.SetNamespace(name.Namespace)
+
+			result, err := controllerutil.CreateOrPatch(ctx, r.Client, obj, func() error {
+				if err := mutateFn(); err != nil {
+					return err
 				}
-			}
-			if portName == "" {
-				return fmt.Errorf(`Could not find the port for Ingress. Either specify one explicitly, or ensure there's a port named "http" or "web"`)
-			}
-			pathType := networkingv1.PathTypeImplementationSpecific
-
-			ingressClassName := app.Spec.Ingress.IngressClassName
-			if ingressClassName == nil {
-				if r.DefaultIngressClassName == "" {
-					return fmt.Errorf("ingress.ingressClassName is not specified, and --ingress-class is not set.")
-				}
-				ingressClassName = ptr.To(r.DefaultIngressClassName)
-			}
-
-			ing.ObjectMeta.Name = name.Name
-			ing.ObjectMeta.Namespace = name.Namespace
-
-			result, err := controllerutil.CreateOrPatch(ctx, r.Client, &ing, func() error {
-				ing.ObjectMeta.Annotations = r.DefaultIngressAnnotations
-
-				ing.Spec.IngressClassName = ingressClassName
-				ing.Spec.Rules = []networkingv1.IngressRule{
-					{
-						Host: app.Spec.Ingress.Host,
-						IngressRuleValue: networkingv1.IngressRuleValue{
-							HTTP: &networkingv1.HTTPIngressRuleValue{
-								Paths: []networkingv1.HTTPIngressPath{
-									{
-										Path:     "/",
-										PathType: &pathType,
-										Backend: networkingv1.IngressBackend{
-											Service: &networkingv1.IngressServiceBackend{
-												Name: namer.ServiceName().Name,
-												Port: networkingv1.ServiceBackendPort{
-													Name: portName,
-												},
-											},
-										},
-									},
-								},
-							},
-						},
-					},
-				}
-				if err := controllerutil.SetControllerReference(app, &ing, r.Scheme); err != nil {
-					log.Error(err, "failed to set controller reference on Ingress")
+				if err := controllerutil.SetControllerReference(app, obj, r.Scheme); err != nil {
+					log.Error(err, "failed to set controller reference")
 					return err
 				}
 				return nil
 			})
 
 			if err != nil {
-				log.Error(err, "failed to create/update the Ingress")
-				r.Recorder.Eventf(app, corev1.EventTypeWarning, EventIngressUpsertFailed, "Could not upsert Ingress %s: %s", name, err)
-				return fmt.Errorf("failed to upsert Ingress %s: %w", name, err)
+				err = fmt.Errorf("failed to upsert %s %s: %w", gvk, name, err)
+				log.Error(err, "")
+				r.Recorder.Eventf(app, corev1.EventTypeWarning, events.UpsertFailed, err.Error())
+				return err
 			}
 
 			switch result {
 			case controllerutil.OperationResultCreated:
-				log.Info("Created Ingress")
-				r.Recorder.Eventf(app, corev1.EventTypeNormal, EventIngressCreated, "Ingress %s has been created", name)
+				log.Info("Created")
+				r.Recorder.Eventf(app, corev1.EventTypeNormal, events.Created, "%s %s has been created", gvk, name)
 			case controllerutil.OperationResultUpdated:
-				log.Info("Updated Ingress")
-				r.Recorder.Eventf(app, corev1.EventTypeNormal, EventIngressUpdated, "Ingress %s has been updated", name)
+				log.Info("Updated")
+				r.Recorder.Eventf(app, corev1.EventTypeNormal, events.Updated, "%s %s has been updated", gvk, name)
 			}
 		}
 
 	} else {
 		if found {
-			// delete
-			err := r.Client.Delete(ctx, &ing)
+			err := r.Client.Delete(ctx, obj)
 			if err != nil {
-				err = fmt.Errorf("failed to delete Ingress %s: %w", name, err)
+				err = fmt.Errorf("failed to delete %s %s: %w", gvk, name, err)
 				log.Error(err, "")
-				r.Recorder.Eventf(app, corev1.EventTypeWarning, EventIngressUpsertFailed, "%s", err.Error())
+				r.Recorder.Eventf(app, corev1.EventTypeWarning, events.DeleteFailed, err.Error())
 				return err
 			}
 			return nil
 		} else {
-			log.Info("Application does not specify Ingress, skipping Ingress creation.")
+			log.Info("Application does not need the resource; skipping creation.")
 			return nil
 		}
 	}
 
 	return nil
+}
+
+func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+	var ing networkingv1.Ingress
+	mutator := &ingressMutator{
+		DefaultIngressAnnotations: r.DefaultIngressAnnotations,
+		DefaultIngressClassName:   r.DefaultIngressClassName,
+		namer:                     namer,
+	}
+
+	return r.ensureResource(
+		ctx,
+		app,
+		namer,
+		namer.IngressName(),
+		&ing,
+		mutator.Mutate(ctx, app, &ing),
+		app.Spec.Ingress != nil,
+		eventMap{
+			Created:      EventIngressCreated,
+			Updated:      EventIngressUpdated,
+			UpsertFailed: EventIngressUpsertFailed,
+			Deleted:      EventIngressDeleted,
+			DeleteFailed: EventIngressDeleteFailed,
+		},
+	)
 }
 
 func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {

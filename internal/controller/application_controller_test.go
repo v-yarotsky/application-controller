@@ -555,7 +555,7 @@ var _ = Describe("Application controller", func() {
 		name := mkName(app.Namespace, app.Name)
 		var ing networkingv1.Ingress
 
-		By("Creating the role bindings")
+		By("Creating the Ingress")
 		EventuallyGetObject(ctx, name, &ing)
 
 		By("Updating the Application")
@@ -565,6 +565,26 @@ var _ = Describe("Application controller", func() {
 
 		By("Eventually removing the ingress")
 		EventuallyNotFindObject(ctx, name, &ing)
+	}, SpecTimeout(5*time.Second))
+
+	It("Should remove Load Balancer service when disabled", func(ctx SpecContext) {
+		imageRef := registry.MustUpsertTag("app12", "latest")
+		app := makeApp("app12", imageRef)
+		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+
+		name := mkName(app.Namespace, fmt.Sprintf("%s-loadbalancer", app.Name))
+		var svc corev1.Service
+
+		By("Creating the LoadBalancer Service")
+		EventuallyGetObject(ctx, name, &svc)
+
+		By("Updating the Application")
+		EventuallyUpdateApp(ctx, &app, func() {
+			app.Spec.LoadBalancer = nil
+		})
+
+		By("Eventually removing the LoadBalancer Service")
+		EventuallyNotFindObject(ctx, name, &svc)
 	}, SpecTimeout(5*time.Second))
 })
 
