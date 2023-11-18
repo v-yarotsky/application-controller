@@ -263,58 +263,10 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 }
 
-func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) (*appsv1.Deployment, error) {
-	log := log.FromContext(ctx)
-
-	var deploy appsv1.Deployment
-	mutator := &deploymentMutator{
-		namer:       namer,
-		imageFinder: r.ImageFinder,
-	}
-
-	err := r.ensureResource(
-		ctx,
-		app,
-		namer.DeploymentName(),
-		&deploy,
-		mutator.Mutate(ctx, app, &deploy),
-		true,
-		DeploymentEvents,
-	)
-
-	if err != nil {
-		if errors.Is(err, ErrImageCheckFailed) {
-			log.Error(err, "")
-			r.Recorder.Eventf(app, corev1.EventTypeWarning, EventImageCheckFailed, "New image version check failed: %s", err.Error())
-		}
-		return nil, err
-	}
-
-	oldImage := app.Status.Image
-	newImage := deploy.Spec.Template.Spec.Containers[0].Image
-	if oldImage != newImage {
-		log.Info("Updated container image", "oldimage", oldImage, "newimage", newImage)
-		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventImageUpdated, "Updating image %s -> %s", oldImage, newImage)
-
-		app.Status.Image = newImage
-		app.Status.ImageLastUpdateTime = metav1.Now()
-	}
-
-	return &deploy, nil
-}
-
 func (r *ApplicationReconciler) ensureServiceAccount(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	var sa corev1.ServiceAccount
-
-	return r.ensureResource(
-		ctx,
-		app,
-		namer.ServiceAccountName(),
-		&sa,
-		func() error { return nil },
-		true,
-		ServiceAccountEvents,
-	)
+	wanted := true
+	return r.ensureResource(ctx, app, namer.ServiceAccountName(), &sa, func() error { return nil }, wanted, ServiceAccountEvents)
 }
 
 func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
@@ -333,9 +285,7 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 		seenSet[types.NamespacedName{Namespace: rb.Namespace, Name: rb.Name}] = false
 	}
 
-	mutator := &roleBindingMutator{
-		namer: namer,
-	}
+	mutator := &roleBindingMutator{namer: namer}
 
 	for _, roleRef := range app.Spec.Roles {
 		if roleRef.ScopeOrDefault() != yarotskymev1alpha1.RoleBindingScopeNamespace {
@@ -353,16 +303,7 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 		seenSet[name] = true
 
 		var rb rbacv1.RoleBinding
-
-		if err := r.ensureResource(
-			ctx,
-			app,
-			name,
-			&rb,
-			mutator.Mutate(ctx, app, &rb, roleRef),
-			true,
-			RoleBindingEvents,
-		); err != nil {
+		if err := r.ensureResource(ctx, app, name, &rb, mutator.Mutate(ctx, app, &rb, roleRef), true, RoleBindingEvents); err != nil {
 			return err
 		}
 	}
@@ -394,9 +335,7 @@ func (r *ApplicationReconciler) ensureClusterRoleBindings(ctx context.Context, a
 		seenSet[types.NamespacedName{Name: crb.Name}] = false
 	}
 
-	mutator := &clusterRoleBindingMutator{
-		namer: namer,
-	}
+	mutator := &clusterRoleBindingMutator{namer: namer}
 
 	for _, roleRef := range app.Spec.Roles {
 		if roleRef.ScopeOrDefault() != yarotskymev1alpha1.RoleBindingScopeCluster {
@@ -419,15 +358,7 @@ func (r *ApplicationReconciler) ensureClusterRoleBindings(ctx context.Context, a
 		seenSet[name] = true
 
 		var crb rbacv1.ClusterRoleBinding
-		if err := r.ensureResource(
-			ctx,
-			app,
-			name,
-			&crb,
-			mutator.Mutate(ctx, app, &crb, roleRef),
-			true,
-			ClusterRoleBindingEvents,
-		); err != nil {
+		if err := r.ensureResource(ctx, app, name, &crb, mutator.Mutate(ctx, app, &crb, roleRef), true, ClusterRoleBindingEvents); err != nil {
 			return err
 		}
 	}
@@ -448,36 +379,16 @@ func (r *ApplicationReconciler) ensureClusterRoleBindings(ctx context.Context, a
 
 func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	var svc corev1.Service
-	mutator := &serviceMutator{
-		namer: namer,
-	}
-
-	return r.ensureResource(
-		ctx,
-		app,
-		namer.ServiceName(),
-		&svc,
-		mutator.Mutate(ctx, app, &svc),
-		true,
-		ServiceEvents,
-	)
+	mutator := &serviceMutator{namer: namer}
+	wanted := true
+	return r.ensureResource(ctx, app, namer.ServiceName(), &svc, mutator.Mutate(ctx, app, &svc), wanted, ServiceEvents)
 }
 
 func (r *ApplicationReconciler) ensureLBService(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	var svc corev1.Service
-	mutator := &lbServiceMutator{
-		namer: namer,
-	}
-
-	return r.ensureResource(
-		ctx,
-		app,
-		namer.LBServiceName(),
-		&svc,
-		mutator.Mutate(ctx, app, &svc),
-		app.Spec.LoadBalancer != nil,
-		LBServiceEvents,
-	)
+	mutator := &lbServiceMutator{namer: namer}
+	wanted := app.Spec.LoadBalancer != nil
+	return r.ensureResource(ctx, app, namer.LBServiceName(), &svc, mutator.Mutate(ctx, app, &svc), wanted, LBServiceEvents)
 }
 
 func (r *ApplicationReconciler) ensurePodMonitor(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
@@ -489,20 +400,9 @@ func (r *ApplicationReconciler) ensurePodMonitor(ctx context.Context, app *yarot
 	}
 
 	var mon prometheusv1.PodMonitor
-
-	mutator := &podMonitorMutator{
-		namer: namer,
-	}
-
-	return r.ensureResource(
-		ctx,
-		app,
-		namer.PodMonitorName(),
-		&mon,
-		mutator.Mutate(ctx, app, &mon),
-		app.Spec.Metrics != nil && app.Spec.Metrics.Enabled,
-		PodMonitorEvents,
-	)
+	mutator := &podMonitorMutator{namer: namer}
+	wanted := app.Spec.Metrics != nil && app.Spec.Metrics.Enabled
+	return r.ensureResource(ctx, app, namer.PodMonitorName(), &mon, mutator.Mutate(ctx, app, &mon), wanted, PodMonitorEvents)
 }
 
 func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
@@ -512,16 +412,40 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 		DefaultIngressClassName:   r.DefaultIngressClassName,
 		namer:                     namer,
 	}
+	wanted := app.Spec.Ingress != nil
+	return r.ensureResource(ctx, app, namer.IngressName(), &ing, mutator.Mutate(ctx, app, &ing), wanted, IngressEvents)
+}
 
-	return r.ensureResource(
-		ctx,
-		app,
-		namer.IngressName(),
-		&ing,
-		mutator.Mutate(ctx, app, &ing),
-		app.Spec.Ingress != nil,
-		IngressEvents,
-	)
+func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) (*appsv1.Deployment, error) {
+	log := log.FromContext(ctx)
+
+	var deploy appsv1.Deployment
+	mutator := &deploymentMutator{
+		namer:       namer,
+		imageFinder: r.ImageFinder,
+	}
+	wanted := true
+	err := r.ensureResource(ctx, app, namer.DeploymentName(), &deploy, mutator.Mutate(ctx, app, &deploy), wanted, DeploymentEvents)
+
+	if err != nil {
+		if errors.Is(err, ErrImageCheckFailed) {
+			log.Error(err, "")
+			r.Recorder.Eventf(app, corev1.EventTypeWarning, EventImageCheckFailed, "New image version check failed: %s", err.Error())
+		}
+		return nil, err
+	}
+
+	oldImage := app.Status.Image
+	newImage := deploy.Spec.Template.Spec.Containers[0].Image
+	if oldImage != newImage {
+		log.Info("Updated container image", "oldimage", oldImage, "newimage", newImage)
+		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventImageUpdated, "Updating image %s -> %s", oldImage, newImage)
+
+		app.Status.Image = newImage
+		app.Status.ImageLastUpdateTime = metav1.Now()
+	}
+
+	return &deploy, nil
 }
 
 func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
