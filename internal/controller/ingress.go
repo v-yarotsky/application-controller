@@ -15,6 +15,11 @@ type ingressMutator struct {
 	namer                     Namer
 }
 
+var (
+	ErrNoIngressPort  = fmt.Errorf(`Could not find the port for Ingress. Either specify one explicitly, or ensure there's a port named "http" or "web"`)
+	ErrNoIngressClass = fmt.Errorf(`ingress.ingressClassName is not specified, and --ingress-class is not set.`)
+)
+
 func (f *ingressMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.Application, ing *networkingv1.Ingress) func() error {
 	return func() error {
 		portName := app.Spec.Ingress.PortName
@@ -24,17 +29,21 @@ func (f *ingressMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.App
 					portName = "http"
 					break
 				}
+				if p.Name == "web" {
+					portName = "web"
+					break
+				}
 			}
 		}
 		if portName == "" {
-			return fmt.Errorf(`Could not find the port for Ingress. Either specify one explicitly, or ensure there's a port named "http" or "web"`)
+			return ErrNoIngressPort
 		}
 		pathType := networkingv1.PathTypeImplementationSpecific
 
 		ingressClassName := app.Spec.Ingress.IngressClassName
 		if ingressClassName == nil {
 			if f.DefaultIngressClassName == "" {
-				return fmt.Errorf("ingress.ingressClassName is not specified, and --ingress-class is not set.")
+				return ErrNoIngressClass
 			}
 			ingressClassName = ptr.To(f.DefaultIngressClassName)
 		}
