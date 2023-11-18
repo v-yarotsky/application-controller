@@ -56,6 +56,11 @@ var _ = Describe("Application controller", func() {
 						Protocol:      corev1.ProtocolTCP,
 					},
 					{
+						ContainerPort: 8192,
+						Name:          "metrics",
+						Protocol:      corev1.ProtocolTCP,
+					},
+					{
 						ContainerPort: 22000,
 						Name:          "listen-udp",
 						Protocol:      corev1.ProtocolUDP,
@@ -68,6 +73,9 @@ var _ = Describe("Application controller", func() {
 				LoadBalancer: &yarotskymev1alpha1.LoadBalancer{
 					Host:      "endpoint.home.yarotsky.me",
 					PortNames: []string{"listen-udp"},
+				},
+				Metrics: &yarotskymev1alpha1.Metrics{
+					Enabled: true,
 				},
 				Roles: []yarotskymev1alpha1.ScopedRoleRef{
 					{
@@ -195,9 +203,10 @@ var _ = Describe("Application controller", func() {
 
 			mainContainer := deploy.Spec.Template.Spec.Containers[0]
 			g.Expect(mainContainer.Image).To(Equal(imageRef.String()))
-			g.Expect(mainContainer.Ports).To(HaveLen(2))
+			g.Expect(mainContainer.Ports).To(HaveLen(3))
 			g.Expect(mainContainer.Ports).To(ContainElements(
 				corev1.ContainerPort{ContainerPort: 8080, Name: "http", Protocol: corev1.ProtocolTCP},
+				corev1.ContainerPort{ContainerPort: 8192, Name: "metrics", Protocol: corev1.ProtocolTCP},
 				corev1.ContainerPort{ContainerPort: 22000, Name: "listen-udp", Protocol: corev1.ProtocolUDP},
 			))
 			g.Expect(mainContainer.VolumeMounts).To(ContainElement(corev1.VolumeMount{
@@ -279,6 +288,27 @@ var _ = Describe("Application controller", func() {
 				"app.kubernetes.io/managed-by": "application-controller",
 				"app.kubernetes.io/instance":   "default",
 			}))
+		})
+
+		By("Creating the PodMonitor")
+		var pm prometheusv1.PodMonitor
+		pmName := mkName(app.Namespace, app.Name)
+		EventuallyGetObject(ctx, pmName, &pm, func(g Gomega) {
+			g.Expect(pm.Spec.PodMetricsEndpoints).To(ConsistOf(
+				prometheusv1.PodMetricsEndpoint{
+					Port: "metrics",
+					Path: "/metrics",
+				},
+			))
+
+			g.Expect(pm.Spec.Selector).To(Equal(
+				metav1.LabelSelector{
+					MatchLabels: map[string]string{
+						"app.kubernetes.io/name":       app.Name,
+						"app.kubernetes.io/managed-by": "application-controller",
+						"app.kubernetes.io/instance":   "default",
+					},
+				}))
 		})
 	}, SpecTimeout(5*time.Second))
 
@@ -478,52 +508,12 @@ var _ = Describe("Application controller", func() {
 		EventuallyHaveCondition(ctx, &app, "Ready", metav1.ConditionFalse, "MinimumReplicasUnavailable")
 	}, SpecTimeout(5*time.Second))
 
-	It("Should create PodMonitor with defaults", func(ctx SpecContext) {
+	It("Should create PodMonitor with overrides", func(ctx SpecContext) {
 		imageRef := registry.MustUpsertTag("app9", "latest")
 		app := makeApp("app9", imageRef)
-		app.Spec.Ports = append(app.Spec.Ports, corev1.ContainerPort{
-			Name:          "metrics",
-			ContainerPort: 8192,
-			Protocol:      corev1.ProtocolTCP,
-		})
-		app.Spec.Metrics = &yarotskymev1alpha1.Metrics{
-			Enabled: true,
-		}
-		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
-
-		By("Creating the PodMonitor")
-		var pm prometheusv1.PodMonitor
-		pmName := mkName(app.Namespace, app.Name)
-		EventuallyGetObject(ctx, pmName, &pm, func(g Gomega) {
-			g.Expect(pm.Spec.PodMetricsEndpoints).To(ConsistOf(
-				prometheusv1.PodMetricsEndpoint{
-					Port: "metrics",
-					Path: "/metrics",
-				},
-			))
-
-			g.Expect(pm.Spec.Selector).To(Equal(
-				metav1.LabelSelector{
-					MatchLabels: map[string]string{
-						"app.kubernetes.io/name":       app.Name,
-						"app.kubernetes.io/managed-by": "application-controller",
-						"app.kubernetes.io/instance":   "default",
-					},
-				}))
-		})
-	}, SpecTimeout(5*time.Second))
-
-	It("Should create PodMonitor with overrides", func(ctx SpecContext) {
-		imageRef := registry.MustUpsertTag("app10", "latest")
-		app := makeApp("app10", imageRef)
-		app.Spec.Ports = append(app.Spec.Ports, corev1.ContainerPort{
-			Name:          "mymetrics",
-			ContainerPort: 8192,
-			Protocol:      corev1.ProtocolTCP,
-		})
 		app.Spec.Metrics = &yarotskymev1alpha1.Metrics{
 			Enabled:  true,
-			PortName: "mymetrics",
+			PortName: "http",
 			Path:     "/mymetrics",
 		}
 		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
@@ -534,11 +524,31 @@ var _ = Describe("Application controller", func() {
 		EventuallyGetObject(ctx, pmName, &pm, func(g Gomega) {
 			g.Expect(pm.Spec.PodMetricsEndpoints).To(ConsistOf(
 				prometheusv1.PodMetricsEndpoint{
-					Port: "mymetrics",
+					Port: "http",
 					Path: "/mymetrics",
 				},
 			))
 		})
+	}, SpecTimeout(5*time.Second))
+
+	It("Should remove PodMonitor when disabled", func(ctx SpecContext) {
+		imageRef := registry.MustUpsertTag("app10", "latest")
+		app := makeApp("app10", imageRef)
+		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+
+		name := mkName(app.Namespace, app.Name)
+		var mon prometheusv1.PodMonitor
+
+		By("Creating the PodMonitor")
+		EventuallyGetObject(ctx, name, &mon)
+
+		By("Updating the Application")
+		EventuallyUpdateApp(ctx, &app, func() {
+			app.Spec.Metrics.Enabled = false
+		})
+
+		By("Eventually removing the PodMonitor")
+		EventuallyNotFindObject(ctx, name, &mon)
 	}, SpecTimeout(5*time.Second))
 
 	It("Should determine whether Prometheus is supported", func(ctx SpecContext) {

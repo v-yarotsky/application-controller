@@ -97,6 +97,8 @@ const (
 	EventPodMonitorCreated      = "PodMonitorCreated"
 	EventPodMonitorUpdated      = "PodMonitorUpdated"
 	EventPodMonitorUpsertFailed = "PodMonitorUpsertFailed"
+	EventPodMonitorDeleted      = "PodMonitorDeleted"
+	EventPodMonitorDeleteFailed = "PodMonitorDeleteFailed"
 )
 
 // ApplicationReconciler reconciles a Application object
@@ -660,73 +662,28 @@ func (r *ApplicationReconciler) ensurePodMonitor(ctx context.Context, app *yarot
 		return nil
 	}
 
-	if app.Spec.Metrics == nil {
-		log.Info("Monitoring is not configured for the app; skipping.")
-		return nil
+	var mon prometheusv1.PodMonitor
+
+	mutator := &podMonitorMutator{
+		namer: namer,
 	}
 
-	name := namer.PodMonitorName()
-	log = log.WithValues("servicemonitorname", name.String())
-
-	portName := app.Spec.Metrics.PortName
-	if portName == "" {
-		for _, p := range app.Spec.Ports {
-			if p.Name == "metrics" || p.Name == "prometheus" {
-				portName = p.Name
-				break
-			}
-		}
-	}
-
-	if portName == "" {
-		log.Info(`No monitoring port is specified, and there's no port named "metrics" or "prometheus"; skipping PodMonitor creation`)
-		return nil
-	}
-
-	path := app.Spec.Metrics.Path
-	if path == "" {
-		path = "/metrics"
-	}
-
-	mon := prometheusv1.PodMonitor{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name.Name,
-			Namespace: name.Namespace,
+	return r.ensureResource(
+		ctx,
+		app,
+		namer,
+		namer.PodMonitorName(),
+		&mon,
+		mutator.Mutate(ctx, app, &mon),
+		app.Spec.Metrics != nil && app.Spec.Metrics.Enabled,
+		eventMap{
+			Created:      EventPodMonitorCreated,
+			Updated:      EventPodMonitorUpdated,
+			UpsertFailed: EventPodMonitorUpsertFailed,
+			Deleted:      EventPodMonitorDeleted,
+			DeleteFailed: EventPodMonitorDeleteFailed,
 		},
-	}
-
-	result, err := controllerutil.CreateOrPatch(ctx, r.Client, &mon, func() error {
-		mon.Spec.PodMetricsEndpoints = []prometheusv1.PodMetricsEndpoint{
-			{
-				Port: portName,
-				Path: path,
-			},
-		}
-		mon.Spec.Selector = metav1.LabelSelector{MatchLabels: namer.SelectorLabels()}
-		mon.Spec.PodTargetLabels = []string{"app.kubernetes.io/name"}
-
-		if err := controllerutil.SetControllerReference(app, &mon, r.Scheme); err != nil {
-			log.Error(err, "failed to set controller reference on PodMonitor")
-			return err
-		}
-		return nil
-	})
-
-	if err != nil {
-		log.Error(err, "failed to create/update the PodMonitor")
-		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventPodMonitorUpsertFailed, "Could not upsert PodMonitor %s: %s", name, err)
-		return fmt.Errorf("failed to upsert PodMonitor %s: %w", name, err)
-	}
-
-	switch result {
-	case controllerutil.OperationResultCreated:
-		log.Info("Created PodMonitor")
-		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventPodMonitorCreated, "PodMonitor %s has been created", name)
-	case controllerutil.OperationResultUpdated:
-		log.Info("Updated PodMonitor")
-		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventPodMonitorUpdated, "PodMonitor %s has been updated", name)
-	}
-	return nil
+	)
 }
 
 type eventMap struct {
