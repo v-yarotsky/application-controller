@@ -13,6 +13,10 @@ type podMonitorMutator struct {
 	namer Namer
 }
 
+var (
+	ErrNoMetricsPort = fmt.Errorf(`No monitoring port is specified, and there's no port named "metrics" or "prometheus"`)
+)
+
 func (f *podMonitorMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.Application, mon *prometheusv1.PodMonitor) func() error {
 	return func() error {
 		portName := app.Spec.Metrics.PortName
@@ -26,7 +30,7 @@ func (f *podMonitorMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.
 		}
 
 		if portName == "" {
-			return fmt.Errorf(`No monitoring port is specified, and there's no port named "metrics" or "prometheus"; skipping PodMonitor creation`)
+			return ErrNoMetricsPort
 		}
 
 		path := app.Spec.Metrics.Path
