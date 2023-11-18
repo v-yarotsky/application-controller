@@ -2,9 +2,9 @@ package controller
 
 import (
 	"fmt"
+	"strings"
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
-	"git.home.yarotsky.me/vlad/application-controller/internal/gkutil"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -17,8 +17,8 @@ type Namer interface {
 	LBServiceName() types.NamespacedName
 	PodMonitorName() types.NamespacedName
 	IngressName() types.NamespacedName
-	RoleBindingName(roleRef rbacv1.RoleRef) (types.NamespacedName, error)
-	ClusterRoleBindingName(roleRef rbacv1.RoleRef) (types.NamespacedName, error)
+	RoleBindingName(roleRef rbacv1.RoleRef) types.NamespacedName
+	ClusterRoleBindingName(roleRef rbacv1.RoleRef) types.NamespacedName
 
 	SelectorLabels() map[string]string
 }
@@ -78,31 +78,17 @@ func (a *simpleNamer) IngressName() types.NamespacedName {
 	}
 }
 
-func (a *simpleNamer) RoleBindingName(roleRef rbacv1.RoleRef) (types.NamespacedName, error) {
-	gk := gkutil.FromRoleRef(roleRef)
-	if gkutil.IsClusterRole(gk) {
-		return types.NamespacedName{
-			Name:      fmt.Sprintf("%s-%s-%s", a.Name, "clusterrole", roleRef.Name),
-			Namespace: a.Namespace,
-		}, nil
-	} else if gkutil.IsRole(gk) {
-		return types.NamespacedName{
-			Name:      fmt.Sprintf("%s-%s-%s", a.Name, "role", roleRef.Name),
-			Namespace: a.Namespace,
-		}, nil
-	} else {
-		return types.NamespacedName{}, fmt.Errorf("Cannot create role binding name for %s", gk.String())
+func (a *simpleNamer) RoleBindingName(roleRef rbacv1.RoleRef) types.NamespacedName {
+	return types.NamespacedName{
+		Name:      fmt.Sprintf("%s-%s-%s", a.Name, strings.ToLower(roleRef.Kind), roleRef.Name),
+		Namespace: a.Namespace,
 	}
 }
 
-func (a *simpleNamer) ClusterRoleBindingName(roleRef rbacv1.RoleRef) (types.NamespacedName, error) {
-	gk := gkutil.FromRoleRef(roleRef)
-	if !gkutil.IsClusterRole(gk) {
-		return types.NamespacedName{}, fmt.Errorf("Cannot create cluster role binding name for %s", gk.String())
-	}
+func (a *simpleNamer) ClusterRoleBindingName(roleRef rbacv1.RoleRef) types.NamespacedName {
 	return types.NamespacedName{
-		Name: fmt.Sprintf("%s-%s-%s-%s", a.Namespace, a.Name, "clusterrole", roleRef.Name),
-	}, nil
+		Name: fmt.Sprintf("%s-%s-%s-%s", a.Namespace, a.Name, strings.ToLower(roleRef.Kind), roleRef.Name),
+	}
 }
 
 func (a *simpleNamer) SelectorLabels() map[string]string {

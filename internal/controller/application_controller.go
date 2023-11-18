@@ -218,35 +218,35 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, nil
 	}
 
-	if err := r.ensureServiceAccount(ctx, &app, namer); err != nil {
+	if err := r.reconcileServiceAccount(ctx, &app, namer); err != nil {
 		return r.updateStatusWithError(ctx, &app, err, ServiceAccountEvents.UpsertFailed)
 	}
 
-	if err := r.ensureRoleBindings(ctx, &app, namer); err != nil {
+	if err := r.reconcileRoleBindings(ctx, &app, namer); err != nil {
 		return r.updateStatusWithError(ctx, &app, err, RoleBindingEvents.UpsertFailed)
 	}
 
-	if err := r.ensureClusterRoleBindings(ctx, &app, namer); err != nil {
+	if err := r.reconcileClusterRoleBindings(ctx, &app, namer); err != nil {
 		return r.updateStatusWithError(ctx, &app, err, ClusterRoleBindingEvents.UpsertFailed)
 	}
 
-	if err := r.ensureService(ctx, &app, namer); err != nil {
+	if err := r.reconcileService(ctx, &app, namer); err != nil {
 		return r.updateStatusWithError(ctx, &app, err, ServiceEvents.UpsertFailed)
 	}
 
-	if err := r.ensureLBService(ctx, &app, namer); err != nil {
+	if err := r.reconcileLBService(ctx, &app, namer); err != nil {
 		return r.updateStatusWithError(ctx, &app, err, LBServiceEvents.UpsertFailed)
 	}
 
-	if err := r.ensurePodMonitor(ctx, &app, namer); err != nil {
+	if err := r.reconcilePodMonitor(ctx, &app, namer); err != nil {
 		return r.updateStatusWithError(ctx, &app, err, PodMonitorEvents.UpsertFailed)
 	}
 
-	if err := r.ensureIngress(ctx, &app, namer); err != nil {
+	if err := r.reconcileIngress(ctx, &app, namer); err != nil {
 		return r.updateStatusWithError(ctx, &app, err, IngressEvents.UpsertFailed)
 	}
 
-	if deploy, err := r.ensureDeployment(ctx, &app, namer); err != nil {
+	if deploy, err := r.reconcileDeployment(ctx, &app, namer); err != nil {
 		return r.updateStatusWithError(ctx, &app, err, DeploymentEvents.UpsertFailed)
 	} else {
 		deployConditions := k8s.ConvertDeploymentConditionsToStandardForm(deploy.Status.Conditions)
@@ -263,13 +263,12 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 }
 
-func (r *ApplicationReconciler) ensureServiceAccount(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+func (r *ApplicationReconciler) reconcileServiceAccount(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	var sa corev1.ServiceAccount
-	wanted := true
-	return r.ensureResource(ctx, app, namer.ServiceAccountName(), &sa, func() error { return nil }, wanted, ServiceAccountEvents)
+	return r.ensureResource(ctx, app, namer.ServiceAccountName(), &sa, func() error { return nil }, ServiceAccountEvents)
 }
 
-func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+func (r *ApplicationReconciler) reconcileRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	baseLog := log.FromContext(ctx)
 
 	rbs := &rbacv1.RoleBindingList{}
@@ -292,37 +291,28 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 			continue
 		}
 
-		log := baseLog.WithValues("kind", roleRef.Kind, "name", roleRef.Name)
-
-		name, err := namer.RoleBindingName(roleRef.RoleRef)
-		if err != nil {
-			log.Error(err, "failed to generate name for a RoleBinding")
-			return err
-		}
-
+		name := namer.RoleBindingName(roleRef.RoleRef)
 		seenSet[name] = true
 
 		var rb rbacv1.RoleBinding
-		if err := r.ensureResource(ctx, app, name, &rb, mutator.Mutate(ctx, app, &rb, roleRef), true, RoleBindingEvents); err != nil {
+		if err := r.ensureResource(ctx, app, name, &rb, mutator.Mutate(ctx, app, &rb, roleRef), RoleBindingEvents); err != nil {
 			return err
 		}
 	}
 
 	for rbName, seen := range seenSet {
-		if seen {
-			continue
-		}
-
-		var rb rbacv1.RoleBinding
-		if err := r.ensureNoResource(ctx, app, rbName, &rb, RoleBindingEvents); err != nil {
-			return err
+		if !seen {
+			var rb rbacv1.RoleBinding
+			if err := r.ensureNoResource(ctx, app, rbName, &rb, RoleBindingEvents); err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
 }
 
-func (r *ApplicationReconciler) ensureClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+func (r *ApplicationReconciler) reconcileClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	baseLog := log.FromContext(ctx)
 
 	crbs, err := r.getOwnedClusterRoleBindings(ctx, namer)
@@ -349,49 +339,41 @@ func (r *ApplicationReconciler) ensureClusterRoleBindings(ctx context.Context, a
 			return err
 		}
 
-		name, err := namer.ClusterRoleBindingName(roleRef.RoleRef)
-		if err != nil {
-			baseLog.Error(err, "failed to generate name for a ClusterRoleBinding")
-			return err
-		}
-
+		name := namer.ClusterRoleBindingName(roleRef.RoleRef)
 		seenSet[name] = true
 
 		var crb rbacv1.ClusterRoleBinding
-		if err := r.ensureResource(ctx, app, name, &crb, mutator.Mutate(ctx, app, &crb, roleRef), true, ClusterRoleBindingEvents); err != nil {
+		if err := r.ensureResource(ctx, app, name, &crb, mutator.Mutate(ctx, app, &crb, roleRef), ClusterRoleBindingEvents); err != nil {
 			return err
 		}
 	}
 
 	for crbName, seen := range seenSet {
-		if seen {
-			continue
-		}
-
-		var crb rbacv1.ClusterRoleBinding
-		if err := r.ensureNoResource(ctx, app, crbName, &crb, ClusterRoleBindingEvents); err != nil {
-			return err
+		if !seen {
+			var crb rbacv1.ClusterRoleBinding
+			if err := r.ensureNoResource(ctx, app, crbName, &crb, ClusterRoleBindingEvents); err != nil {
+				return err
+			}
 		}
 	}
 
 	return nil
 }
 
-func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+func (r *ApplicationReconciler) reconcileService(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	var svc corev1.Service
 	mutator := &serviceMutator{namer: namer}
-	wanted := true
-	return r.ensureResource(ctx, app, namer.ServiceName(), &svc, mutator.Mutate(ctx, app, &svc), wanted, ServiceEvents)
+	return r.ensureResource(ctx, app, namer.ServiceName(), &svc, mutator.Mutate(ctx, app, &svc), ServiceEvents)
 }
 
-func (r *ApplicationReconciler) ensureLBService(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+func (r *ApplicationReconciler) reconcileLBService(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	var svc corev1.Service
 	mutator := &lbServiceMutator{namer: namer}
 	wanted := app.Spec.LoadBalancer != nil
-	return r.ensureResource(ctx, app, namer.LBServiceName(), &svc, mutator.Mutate(ctx, app, &svc), wanted, LBServiceEvents)
+	return r.reconcileResource(ctx, app, namer.LBServiceName(), &svc, mutator.Mutate(ctx, app, &svc), wanted, LBServiceEvents)
 }
 
-func (r *ApplicationReconciler) ensurePodMonitor(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+func (r *ApplicationReconciler) reconcilePodMonitor(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	log := log.FromContext(ctx)
 
 	if !r.SupportsPrometheus {
@@ -402,10 +384,10 @@ func (r *ApplicationReconciler) ensurePodMonitor(ctx context.Context, app *yarot
 	var mon prometheusv1.PodMonitor
 	mutator := &podMonitorMutator{namer: namer}
 	wanted := app.Spec.Metrics != nil && app.Spec.Metrics.Enabled
-	return r.ensureResource(ctx, app, namer.PodMonitorName(), &mon, mutator.Mutate(ctx, app, &mon), wanted, PodMonitorEvents)
+	return r.reconcileResource(ctx, app, namer.PodMonitorName(), &mon, mutator.Mutate(ctx, app, &mon), wanted, PodMonitorEvents)
 }
 
-func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+func (r *ApplicationReconciler) reconcileIngress(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	var ing networkingv1.Ingress
 	mutator := &ingressMutator{
 		DefaultIngressAnnotations: r.DefaultIngressAnnotations,
@@ -413,10 +395,10 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 		namer:                     namer,
 	}
 	wanted := app.Spec.Ingress != nil
-	return r.ensureResource(ctx, app, namer.IngressName(), &ing, mutator.Mutate(ctx, app, &ing), wanted, IngressEvents)
+	return r.reconcileResource(ctx, app, namer.IngressName(), &ing, mutator.Mutate(ctx, app, &ing), wanted, IngressEvents)
 }
 
-func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) (*appsv1.Deployment, error) {
+func (r *ApplicationReconciler) reconcileDeployment(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) (*appsv1.Deployment, error) {
 	log := log.FromContext(ctx)
 
 	var deploy appsv1.Deployment
@@ -424,8 +406,7 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 		namer:       namer,
 		imageFinder: r.ImageFinder,
 	}
-	wanted := true
-	err := r.ensureResource(ctx, app, namer.DeploymentName(), &deploy, mutator.Mutate(ctx, app, &deploy), wanted, DeploymentEvents)
+	err := r.ensureResource(ctx, app, namer.DeploymentName(), &deploy, mutator.Mutate(ctx, app, &deploy), DeploymentEvents)
 
 	if err != nil {
 		if errors.Is(err, ErrImageCheckFailed) {
@@ -475,7 +456,38 @@ func (r *ApplicationReconciler) getOwnedClusterRoleBindings(ctx context.Context,
 	return ownedClusterRoleBindings.Items, nil
 }
 
-func (r *ApplicationReconciler) ensureResource(
+func (r *ApplicationReconciler) ensureResource(ctx context.Context, app *yarotskymev1alpha1.Application, name types.NamespacedName, obj client.Object, mutateFn func() error, events eventMap) error {
+	return r.reconcileResource(
+		ctx,
+		app,
+		name,
+		obj,
+		mutateFn,
+		true,
+		events,
+	)
+}
+
+func (r *ApplicationReconciler) ensureNoResource(ctx context.Context, app *yarotskymev1alpha1.Application, name types.NamespacedName, obj client.Object, events eventMap) error {
+	return r.reconcileResource(
+		ctx,
+		app,
+		name,
+		obj,
+		func() error { return nil },
+		false,
+		events,
+	)
+}
+
+// reconcileResource makes sure that the state of a given "owned" resource matches
+// the desired state:
+// - resources that are wanted, but do not exist are created;
+// - resources that are wanted and exist are updated to match the desired state;
+// - resources that are no longer wanted are cleaned up.
+//
+// It ensures that the ownership information is present in the "owned" object.
+func (r *ApplicationReconciler) reconcileResource(
 	ctx context.Context,
 	app *yarotskymev1alpha1.Application,
 	name types.NamespacedName,
@@ -564,18 +576,6 @@ func (r *ApplicationReconciler) ensureResource(
 	return nil
 }
 
-func (r *ApplicationReconciler) ensureNoResource(ctx context.Context, app *yarotskymev1alpha1.Application, name types.NamespacedName, obj client.Object, events eventMap) error {
-	return r.ensureResource(
-		ctx,
-		app,
-		name,
-		obj,
-		func() error { return nil },
-		false,
-		events,
-	)
-}
-
 // SetupWithManager sets up the controller with the Manager.
 func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	indexer := mgr.GetFieldIndexer()
@@ -584,17 +584,19 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 
+	gvk, _ := apiutil.GVKForObject(&yarotskymev1alpha1.Application{}, r.Scheme)
+
 	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&yarotskymev1alpha1.Application{})
 
 	builder.
-		Owns(&appsv1.Deployment{}).                                                                    // Reconcile when an owned Deployment is changed.
-		Owns(&corev1.Service{}).                                                                       // Reconcile when an owned Service is changed.
-		Owns(&corev1.ServiceAccount{}).                                                                // Reconcile when an owned AccountService is changed.
-		Owns(&networkingv1.Ingress{}).                                                                 // Reconcile when an owned Ingress is changed.
-		Owns(&rbacv1.RoleBinding{}).                                                                   // Reconcile when an owned RoleBinding is changed.
-		Watches(&rbacv1.ClusterRoleBinding{}, &osdkHandler.EnqueueRequestForAnnotation{Type: r.gk()}). // Reconcile when an "owner" ClusterRoleBinding is changed		WatchesRawSource(
-		WatchesRawSource(                                                                              // Reconcile when a new image becomes available for an Application
+		Owns(&appsv1.Deployment{}).                                                                             // Reconcile when an owned Deployment is changed.
+		Owns(&corev1.Service{}).                                                                                // Reconcile when an owned Service is changed.
+		Owns(&corev1.ServiceAccount{}).                                                                         // Reconcile when an owned AccountService is changed.
+		Owns(&networkingv1.Ingress{}).                                                                          // Reconcile when an owned Ingress is changed.
+		Owns(&rbacv1.RoleBinding{}).                                                                            // Reconcile when an owned RoleBinding is changed.
+		Watches(&rbacv1.ClusterRoleBinding{}, &osdkHandler.EnqueueRequestForAnnotation{Type: gvk.GroupKind()}). // Reconcile when an "owner" ClusterRoleBinding is changed		WatchesRawSource(
+		WatchesRawSource(                                                                                       // Reconcile when a new image becomes available for an Application
 			&source.Channel{Source: r.ImageUpdateEvents},
 			&handler.EnqueueRequestForObject{},
 		)
@@ -606,6 +608,7 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return builder.Complete(r)
 }
 
+// setupIndex allows querying "owned" objects.
 func (r *ApplicationReconciler) setupIndexes(indexer client.FieldIndexer) error {
 	if err := r.setupRoleBindingIndex(indexer); err != nil {
 		return err
@@ -631,7 +634,11 @@ func (r *ApplicationReconciler) setupRoleBindingIndex(indexer client.FieldIndexe
 	})
 }
 
-// Index "owned" ClusterRoleBinding objects by owner in our cache
+// Index "owned" ClusterRoleBinding objects by owner in our cache.
+// Since namespaced objects cannot "own" cluster-scoped objects via `.metadata.ownerReferences`,
+// we use operator-lib's special annotation [^1].
+//
+// [^1]: https://github.com/operator-framework/operator-lib/blob/152ee1fb7f830346e32ae4cf737bb56335903998/handler/enqueue_annotation.go#L159
 func (r *ApplicationReconciler) setupClusterRoleBindingIndex(indexer client.FieldIndexer) error {
 	return indexer.IndexField(context.Background(), &rbacv1.ClusterRoleBinding{}, roleBindingOwnerKey, func(rawObj client.Object) []string {
 		rb := rawObj.(*rbacv1.ClusterRoleBinding)
@@ -647,11 +654,6 @@ func (r *ApplicationReconciler) setupClusterRoleBindingIndex(indexer client.Fiel
 		}
 		return nil
 	})
-}
-
-func (r *ApplicationReconciler) gk() schema.GroupKind {
-	gvk, _ := apiutil.GVKForObject(&yarotskymev1alpha1.Application{}, r.Scheme)
-	return gvk.GroupKind()
 }
 
 func (r *ApplicationReconciler) setErrorCondition(app *yarotskymev1alpha1.Application, err error, reason string) {
@@ -695,6 +697,11 @@ func (r *ApplicationReconciler) updateStatusWithError(ctx context.Context, app *
 	return result, errors.Join(err, statusErr)
 }
 
+// isObjectOwnedBy checks ownership of `obj` by `owner`.
+// For cluster-scoped resources, it checks the annotation set via operator-lib[^1].
+// For namespace-scoped resources, it checks the `obj` has `owner` as its controller using `.metadata.ownerReferences`
+//
+// [^1]: https://github.com/operator-framework/operator-lib/blob/152ee1fb7f830346e32ae4cf737bb56335903998/handler/enqueue_annotation.go#L159
 func (r *ApplicationReconciler) isObjectOwnedBy(obj client.Object, owner client.Object) bool {
 	if namespaced, err := apiutil.IsObjectNamespaced(obj, r.Scheme, r.RESTMapper()); err == nil && namespaced {
 		controller := metav1.GetControllerOf(obj)
