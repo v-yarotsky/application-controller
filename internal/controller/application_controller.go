@@ -54,50 +54,70 @@ const (
 	Name                          = "application-controller"
 	ExternalDNSHostnameAnnotation = "external-dns.alpha.kubernetes.io/hostname"
 
-	EventClusterRoleBindingCreated      = "ClusterRoleBindingCreated"
-	EventClusterRoleBindingUpdated      = "ClusterRoleBindingUpdated"
-	EventClusterRoleBindingUpsertFailed = "ClusterRoleBindingUpsertFailed"
-	EventDeleteClusterRoleBindingFailed = "DeleteClusterRoleBindingFailed"
-	EventDeletingClusterRoleBinding     = "DeletingClusterRoleBinding"
-
-	EventDeploymentCreated      = "DeploymentCreated"
-	EventDeploymentUpdated      = "DeploymentUpdated"
-	EventDeploymentUpsertFailed = "DeploymentUpsertFailed"
-
 	EventImageCheckFailed = "ImageCheckFailed"
 	EventImageUpdated     = "ImageUpdated"
 
-	EventIngressCreated      = "IngressCreated"
-	EventIngressUpdated      = "IngressUpdated"
-	EventIngressUpsertFailed = "IngressUpsertFailed"
-	EventIngressDeleted      = "IngressDeleted"
-	EventIngressDeleteFailed = "IngressDeleteFailed"
-
 	EventReasonCleanup = "Cleanup"
+)
 
-	EventRoleBindingCreated      = "RoleBindingCreated"
-	EventRoleBindingUpdated      = "RoleBindingUpdated"
-	EventRoleBindingUpsertFailed = "RoleBindingUpsertFailed"
+var (
+	ClusterRoleBindingEvents = eventMap{
+		Created:      "ClusterRoleBindingCreated",
+		Updated:      "ClusterRoleBindingUpdated",
+		UpsertFailed: "ClusterRoleBindingUpsertFailed",
+		Deleted:      "ClusterRoleBindingDeleted",
+		DeleteFailed: "ClusterRoleBindingDeleteFailed",
+	}
 
-	EventServiceAccountCreated      = "ServiceAccountCreated"
-	EventServiceAccountUpdated      = "ServiceAccountUpdated"
-	EventServiceAccountUpsertFailed = "ServiceAccountUpsertFailed"
+	DeploymentEvents = eventMap{
+		Created:      "DeploymentCreated",
+		Updated:      "DeploymentUpdated",
+		UpsertFailed: "DeploymentUpsertFailed",
+	}
 
-	EventServiceCreated      = "ServiceCreated"
-	EventServiceUpdated      = "ServiceUpdated"
-	EventServiceUpsertFailed = "ServiceUpsertFailed"
+	IngressEvents = eventMap{
+		Created:      "IngressCreated",
+		Updated:      "IngressUpdated",
+		UpsertFailed: "IngressUpsertFailed",
+		Deleted:      "IngressDeleted",
+		DeleteFailed: "IngressDeleteFailed",
+	}
 
-	EventLBServiceCreated      = "LoadBalancerServiceCreated"
-	EventLBServiceUpdated      = "LoadBalancerServiceUpdated"
-	EventLBServiceUpsertFailed = "LoadBalancerServiceUpsertFailed"
-	EventLBServiceDeleted      = "LoadBalancerServiceDeleted"
-	EventLBServiceDeleteFailed = "LoadBalancerServiceDeleteFailed"
+	RoleBindingEvents = eventMap{
+		Created:      "RoleBindingCreated",
+		Updated:      "RoleBindingUpdated",
+		UpsertFailed: "RoleBindingUpsertFailed",
+		Deleted:      "RoleBindingDeleted",
+		DeleteFailed: "RoleBindingDeleteFailed",
+	}
 
-	EventPodMonitorCreated      = "PodMonitorCreated"
-	EventPodMonitorUpdated      = "PodMonitorUpdated"
-	EventPodMonitorUpsertFailed = "PodMonitorUpsertFailed"
-	EventPodMonitorDeleted      = "PodMonitorDeleted"
-	EventPodMonitorDeleteFailed = "PodMonitorDeleteFailed"
+	ServiceAccountEvents = eventMap{
+		Created:      "ServiceAccountCreated",
+		Updated:      "ServiceAccountUpdated",
+		UpsertFailed: "ServiceAccountUpsertFailed",
+	}
+
+	ServiceEvents = eventMap{
+		Created:      "ServiceCreated",
+		Updated:      "ServiceUpdated",
+		UpsertFailed: "ServiceUpsertFailed",
+	}
+
+	LBServiceEvents = eventMap{
+		Created:      "LoadBalancerServiceCreated",
+		Updated:      "LoadBalancerServiceUpdated",
+		UpsertFailed: "LoadBalancerServiceUpsertFailed",
+		Deleted:      "LoadBalancerServiceDeleted",
+		DeleteFailed: "LoadBalancerServiceDeleteFailed",
+	}
+
+	PodMonitorEvents = eventMap{
+		Created:      "PodMonitorCreated",
+		Updated:      "PodMonitorUpdated",
+		UpsertFailed: "PodMonitorUpsertFailed",
+		Deleted:      "PodMonitorDeleted",
+		DeleteFailed: "PodMonitorDeleteFailed",
+	}
 )
 
 // ApplicationReconciler reconciles a Application object
@@ -191,35 +211,35 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	if err := r.ensureServiceAccount(ctx, &app, namer); err != nil {
-		return r.updateStatusWithError(ctx, &app, err, EventServiceAccountUpsertFailed)
+		return r.updateStatusWithError(ctx, &app, err, ServiceAccountEvents.UpsertFailed)
 	}
 
 	if err := r.ensureRoleBindings(ctx, &app, namer); err != nil {
-		return r.updateStatusWithError(ctx, &app, err, EventRoleBindingUpsertFailed)
+		return r.updateStatusWithError(ctx, &app, err, RoleBindingEvents.UpsertFailed)
 	}
 
 	if err := r.ensureClusterRoleBindings(ctx, &app, namer); err != nil {
-		return r.updateStatusWithError(ctx, &app, err, EventClusterRoleBindingUpsertFailed)
+		return r.updateStatusWithError(ctx, &app, err, ClusterRoleBindingEvents.UpsertFailed)
 	}
 
 	if err := r.ensureService(ctx, &app, namer); err != nil {
-		return r.updateStatusWithError(ctx, &app, err, EventServiceUpsertFailed)
+		return r.updateStatusWithError(ctx, &app, err, ServiceEvents.UpsertFailed)
 	}
 
 	if err := r.ensureLBService(ctx, &app, namer); err != nil {
-		return r.updateStatusWithError(ctx, &app, err, EventLBServiceUpsertFailed)
+		return r.updateStatusWithError(ctx, &app, err, LBServiceEvents.UpsertFailed)
 	}
 
 	if err := r.ensurePodMonitor(ctx, &app, namer); err != nil {
-		return r.updateStatusWithError(ctx, &app, err, EventPodMonitorUpsertFailed)
+		return r.updateStatusWithError(ctx, &app, err, PodMonitorEvents.UpsertFailed)
 	}
 
 	if err := r.ensureIngress(ctx, &app, namer); err != nil {
-		return r.updateStatusWithError(ctx, &app, err, EventIngressUpsertFailed)
+		return r.updateStatusWithError(ctx, &app, err, IngressEvents.UpsertFailed)
 	}
 
 	if deploy, err := r.ensureDeployment(ctx, &app, namer); err != nil {
-		return r.updateStatusWithError(ctx, &app, err, EventDeploymentUpsertFailed)
+		return r.updateStatusWithError(ctx, &app, err, DeploymentEvents.UpsertFailed)
 	} else {
 		deployConditions := k8s.ConvertDeploymentConditionsToStandardForm(deploy.Status.Conditions)
 
@@ -247,16 +267,11 @@ func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarot
 	err := r.ensureResource(
 		ctx,
 		app,
-		namer,
 		namer.DeploymentName(),
 		&deploy,
 		mutator.Mutate(ctx, app, &deploy),
 		true,
-		eventMap{
-			Created:      EventDeploymentCreated,
-			Updated:      EventDeploymentUpdated,
-			UpsertFailed: EventDeploymentUpsertFailed,
-		},
+		DeploymentEvents,
 	)
 
 	if err != nil {
@@ -286,23 +301,16 @@ func (r *ApplicationReconciler) ensureServiceAccount(ctx context.Context, app *y
 	return r.ensureResource(
 		ctx,
 		app,
-		namer,
 		namer.ServiceAccountName(),
 		&sa,
 		func() error { return nil },
 		true,
-		eventMap{
-			Created:      EventServiceAccountCreated,
-			Updated:      EventServiceAccountUpdated,
-			UpsertFailed: EventServiceAccountUpsertFailed,
-		},
+		ServiceAccountEvents,
 	)
 }
 
 func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	baseLog := log.FromContext(ctx)
-
-	serviceAccountName := namer.ServiceAccountName()
 
 	rbs := &rbacv1.RoleBindingList{}
 
@@ -312,12 +320,20 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 		return err
 	}
 
-	seenSet := make(map[string]bool, len(rbs.Items))
+	seenSet := make(map[types.NamespacedName]bool, len(rbs.Items))
 	for _, rb := range rbs.Items {
-		seenSet[rb.Name] = false
+		seenSet[types.NamespacedName{Namespace: rb.Namespace, Name: rb.Name}] = false
+	}
+
+	mutator := &roleBindingMutator{
+		namer: namer,
 	}
 
 	for _, roleRef := range app.Spec.Roles {
+		if roleRef.ScopeOrDefault() != yarotskymev1alpha1.RoleBindingScopeNamespace {
+			continue
+		}
+
 		log := baseLog.WithValues("kind", roleRef.Kind, "name", roleRef.Name)
 
 		name, err := namer.RoleBindingName(roleRef.RoleRef)
@@ -326,66 +342,30 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 			return err
 		}
 
-		log = log.WithValues("rbname", name.Name)
+		seenSet[name] = true
 
-		if roleRef.ScopeOrDefault() != yarotskymev1alpha1.RoleBindingScopeNamespace {
-			continue
-		}
-		rb := rbacv1.RoleBinding{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name.Name,
-				Namespace: name.Namespace,
-			},
-		}
-		result, err := controllerutil.CreateOrPatch(ctx, r.Client, &rb, func() error {
-			rb.Subjects = []rbacv1.Subject{
-				{
-					APIGroup:  "",
-					Kind:      "ServiceAccount",
-					Name:      serviceAccountName.Name,
-					Namespace: serviceAccountName.Namespace,
-				},
-			}
-			rb.RoleRef = roleRef.RoleRef
-			if err := controllerutil.SetControllerReference(app, &rb, r.Scheme); err != nil {
-				log.Error(err, "failed to set controller reference on RoleBinding")
-				return err
-			}
+		var rb rbacv1.RoleBinding
 
-			return nil
-		})
-		if err != nil {
-			log.Error(err, "failed to create/update RoleBinding")
-			r.Recorder.Eventf(app, corev1.EventTypeWarning, EventRoleBindingUpsertFailed, "Could not upsert RoleBinding %s: %s", name, err)
-			return fmt.Errorf("failed to upsert RoleBinding %s: %w", name, err)
+		if err := r.ensureResource(
+			ctx,
+			app,
+			name,
+			&rb,
+			mutator.Mutate(ctx, app, &rb, roleRef),
+			true,
+			RoleBindingEvents,
+		); err != nil {
+			return err
 		}
-
-		switch result {
-		case controllerutil.OperationResultCreated:
-			log.Info("RoleBinding created")
-			r.Recorder.Eventf(app, corev1.EventTypeNormal, EventRoleBindingCreated, "RoleBinding %s has been created", name)
-		case controllerutil.OperationResultUpdated:
-			log.Info("RoleBinding updated")
-			r.Recorder.Eventf(app, corev1.EventTypeNormal, EventRoleBindingUpdated, "RoleBinding %s has been updated", name)
-		}
-		seenSet[name.Name] = true
 	}
 
 	for rbName, seen := range seenSet {
 		if seen {
 			continue
 		}
-		log := baseLog.WithValues("name", rbName)
-		log.Info("RoleBinding is not needed according to spec. Deleting.")
-		rb := rbacv1.RoleBinding{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      rbName,
-				Namespace: app.Namespace,
-			},
-		}
-		err := r.Client.Delete(ctx, &rb)
-		if err != nil {
-			log.Error(err, "failed to delete RoleBinding")
+
+		var rb rbacv1.RoleBinding
+		if err := r.ensureNoResource(ctx, app, rbName, &rb, RoleBindingEvents); err != nil {
 			return err
 		}
 	}
@@ -396,23 +376,30 @@ func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yar
 func (r *ApplicationReconciler) ensureClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	baseLog := log.FromContext(ctx)
 
-	serviceAccountName := namer.ServiceAccountName()
-
 	crbs, err := r.getOwnedClusterRoleBindings(ctx, namer)
 	if err != nil {
 		return err
 	}
 
-	seenSet := make(map[string]bool, len(crbs))
+	seenSet := make(map[types.NamespacedName]bool, len(crbs))
 	for _, crb := range crbs {
-		seenSet[crb.Name] = false
+		seenSet[types.NamespacedName{Name: crb.Name}] = false
+	}
+
+	mutator := &clusterRoleBindingMutator{
+		namer: namer,
 	}
 
 	for _, roleRef := range app.Spec.Roles {
-		log := baseLog.WithValues("kind", roleRef.Kind, "name", roleRef.Name)
-
 		if roleRef.ScopeOrDefault() != yarotskymev1alpha1.RoleBindingScopeCluster {
 			continue
+		}
+
+		log := baseLog.WithValues("kind", roleRef.Kind, "name", roleRef.Name)
+
+		if !gkutil.IsClusterRole(gkutil.FromRoleRef(roleRef.RoleRef)) {
+			log.Error(err, "ClusterRoleBinding can only be created for a ClusterRole")
+			return err
 		}
 
 		name, err := namer.ClusterRoleBindingName(roleRef.RoleRef)
@@ -421,59 +408,29 @@ func (r *ApplicationReconciler) ensureClusterRoleBindings(ctx context.Context, a
 			return err
 		}
 
-		log = log.WithValues("crbname", name.Name)
+		seenSet[name] = true
 
-		if !gkutil.IsClusterRole(gkutil.FromRoleRef(roleRef.RoleRef)) {
-			log.Error(err, "ClusterRoleBinding can only be created for a ClusterRole")
+		var crb rbacv1.ClusterRoleBinding
+		if err := r.ensureResource(
+			ctx,
+			app,
+			name,
+			&crb,
+			mutator.Mutate(ctx, app, &crb, roleRef),
+			true,
+			ClusterRoleBindingEvents,
+		); err != nil {
 			return err
 		}
-		rb := rbacv1.ClusterRoleBinding{
-			ObjectMeta: metav1.ObjectMeta{Name: name.Name},
-		}
-		result, err := controllerutil.CreateOrPatch(ctx, r.Client, &rb, func() error {
-			osdkHandler.SetOwnerAnnotations(app, &rb)
-
-			rb.Subjects = []rbacv1.Subject{
-				{
-					APIGroup:  "",
-					Kind:      "ServiceAccount",
-					Name:      serviceAccountName.Name,
-					Namespace: serviceAccountName.Namespace,
-				},
-			}
-			rb.RoleRef = roleRef.RoleRef
-
-			return nil
-		})
-		if err != nil {
-			log.Error(err, "failed to create/update a ClusterRoleBinding")
-			r.Recorder.Eventf(app, corev1.EventTypeWarning, EventClusterRoleBindingUpsertFailed, "Could not upsert ClusterRoleBinding %s: %s", name, err)
-			return fmt.Errorf("failed to upsert ClusterRoleBinding %s: %w", name, err)
-		}
-
-		switch result {
-		case controllerutil.OperationResultCreated:
-			log.Info("ClusterRoleBinding created")
-			r.Recorder.Eventf(app, corev1.EventTypeNormal, EventClusterRoleBindingCreated, "ClusterRoleBinding %s has been created", name)
-		case controllerutil.OperationResultUpdated:
-			log.Info("ClusterRoleBinding updated")
-			r.Recorder.Eventf(app, corev1.EventTypeNormal, EventClusterRoleBindingUpdated, "ClusterRoleBinding %s has been updated", name)
-		}
-		seenSet[name.Name] = true
 	}
 
 	for crbName, seen := range seenSet {
 		if seen {
 			continue
 		}
-		log := baseLog.WithValues("name", crbName)
-		log.Info("ClusterRoleBinding is not needed according to spec. Deleting.")
-		crb := rbacv1.ClusterRoleBinding{
-			ObjectMeta: metav1.ObjectMeta{Name: crbName},
-		}
-		err := r.Client.Delete(ctx, &crb)
-		if err != nil {
-			log.Error(err, "failed to delete ClusterRoleBinding")
+
+		var crb rbacv1.ClusterRoleBinding
+		if err := r.ensureNoResource(ctx, app, crbName, &crb, ClusterRoleBindingEvents); err != nil {
 			return err
 		}
 	}
@@ -490,16 +447,11 @@ func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotsky
 	return r.ensureResource(
 		ctx,
 		app,
-		namer,
 		namer.ServiceName(),
 		&svc,
 		mutator.Mutate(ctx, app, &svc),
 		true,
-		eventMap{
-			Created:      EventIngressCreated,
-			Updated:      EventIngressUpdated,
-			UpsertFailed: EventIngressUpsertFailed,
-		},
+		ServiceEvents,
 	)
 }
 
@@ -512,18 +464,11 @@ func (r *ApplicationReconciler) ensureLBService(ctx context.Context, app *yarots
 	return r.ensureResource(
 		ctx,
 		app,
-		namer,
 		namer.LBServiceName(),
 		&svc,
 		mutator.Mutate(ctx, app, &svc),
 		app.Spec.LoadBalancer != nil,
-		eventMap{
-			Created:      EventLBServiceCreated,
-			Updated:      EventLBServiceUpdated,
-			UpsertFailed: EventLBServiceUpsertFailed,
-			Deleted:      EventLBServiceDeleted,
-			DeleteFailed: EventLBServiceDeleteFailed,
-		},
+		LBServiceEvents,
 	)
 }
 
@@ -576,18 +521,11 @@ func (r *ApplicationReconciler) ensurePodMonitor(ctx context.Context, app *yarot
 	return r.ensureResource(
 		ctx,
 		app,
-		namer,
 		namer.PodMonitorName(),
 		&mon,
 		mutator.Mutate(ctx, app, &mon),
 		app.Spec.Metrics != nil && app.Spec.Metrics.Enabled,
-		eventMap{
-			Created:      EventPodMonitorCreated,
-			Updated:      EventPodMonitorUpdated,
-			UpsertFailed: EventPodMonitorUpsertFailed,
-			Deleted:      EventPodMonitorDeleted,
-			DeleteFailed: EventPodMonitorDeleteFailed,
-		},
+		PodMonitorEvents,
 	)
 }
 
@@ -602,7 +540,6 @@ type eventMap struct {
 func (r *ApplicationReconciler) ensureResource(
 	ctx context.Context,
 	app *yarotskymev1alpha1.Application,
-	namer Namer,
 	name types.NamespacedName,
 	obj client.Object,
 	mutateFn func() error,
@@ -626,14 +563,14 @@ func (r *ApplicationReconciler) ensureResource(
 		found = true
 	}
 
-	if found && !objectIsOwnedBy(obj, app) {
+	if found && !r.objectIsOwnedBy(obj, app) {
 		err := fmt.Errorf("%s %s is not owned by the Application; refusing to reconcile!", gvk, name)
 		log.Error(err, "")
 		return err
 	}
 
 	if wanted {
-		if !found || found && objectIsOwnedBy(obj, app) {
+		if !found || found && r.objectIsOwnedBy(obj, app) {
 			obj.SetName(name.Name)
 			obj.SetNamespace(name.Namespace)
 
@@ -641,9 +578,13 @@ func (r *ApplicationReconciler) ensureResource(
 				if err := mutateFn(); err != nil {
 					return err
 				}
-				if err := controllerutil.SetControllerReference(app, obj, r.Scheme); err != nil {
-					log.Error(err, "failed to set controller reference")
-					return err
+				if name.Namespace != "" {
+					if err := controllerutil.SetControllerReference(app, obj, r.Scheme); err != nil {
+						log.Error(err, "failed to set controller reference")
+						return err
+					}
+				} else {
+					osdkHandler.SetOwnerAnnotations(app, obj)
 				}
 				return nil
 			})
@@ -667,6 +608,7 @@ func (r *ApplicationReconciler) ensureResource(
 
 	} else {
 		if found {
+			log.Info("Resource no longer needed; deleting.")
 			err := r.Client.Delete(ctx, obj)
 			if err != nil {
 				err = fmt.Errorf("failed to delete %s %s: %w", gvk, name, err)
@@ -684,6 +626,18 @@ func (r *ApplicationReconciler) ensureResource(
 	return nil
 }
 
+func (r *ApplicationReconciler) ensureNoResource(ctx context.Context, app *yarotskymev1alpha1.Application, name types.NamespacedName, obj client.Object, events eventMap) error {
+	return r.ensureResource(
+		ctx,
+		app,
+		name,
+		obj,
+		func() error { return nil },
+		false,
+		events,
+	)
+}
+
 func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	var ing networkingv1.Ingress
 	mutator := &ingressMutator{
@@ -695,41 +649,22 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 	return r.ensureResource(
 		ctx,
 		app,
-		namer,
 		namer.IngressName(),
 		&ing,
 		mutator.Mutate(ctx, app, &ing),
 		app.Spec.Ingress != nil,
-		eventMap{
-			Created:      EventIngressCreated,
-			Updated:      EventIngressUpdated,
-			UpsertFailed: EventIngressUpsertFailed,
-			Deleted:      EventIngressDeleted,
-			DeleteFailed: EventIngressDeleteFailed,
-		},
+		IngressEvents,
 	)
 }
 
 func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
-	log := log.FromContext(ctx)
-
 	ownedClusterRoleBindings, err := r.getOwnedClusterRoleBindings(ctx, namer)
 	if err != nil {
 		return err
 	}
 
-	if len(ownedClusterRoleBindings) == 0 {
-		return nil
-	}
-
 	for _, crb := range ownedClusterRoleBindings {
-		log = log.WithValues("kind", crb.Kind, "name", crb.Name)
-		log.Info("Deleting ClusterRoleBinding")
-		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventDeletingClusterRoleBinding, "Deleting ClusterRoleBinding %s", crb.Name)
-		err = r.Delete(ctx, &crb)
-		if err != nil {
-			log.Error(err, "failed to delete ClusterRoleBinding")
-			r.Recorder.Eventf(app, corev1.EventTypeWarning, EventDeleteClusterRoleBindingFailed, "Could not delete ClusterRoleBinding %s: %s", crb.Name, err.Error())
+		if err := r.ensureNoResource(ctx, app, types.NamespacedName{Name: crb.Name}, &crb, ClusterRoleBindingEvents); err != nil {
 			return err
 		}
 	}
@@ -876,19 +811,34 @@ func addToMap[K comparable, V any](m map[K]V, key K, value V) map[K]V {
 	return m
 }
 
-func objectIsOwnedBy(obj client.Object, owner client.Object) bool {
-	controller := metav1.GetControllerOf(obj)
-	if controller == nil {
-		return false
-	}
+func (r *ApplicationReconciler) objectIsOwnedBy(obj client.Object, owner client.Object) bool {
+	if namespaced, err := apiutil.IsObjectNamespaced(obj, r.Scheme, r.RESTMapper()); err == nil && namespaced {
+		controller := metav1.GetControllerOf(obj)
+		if controller == nil {
+			return false
+		}
 
-	controllerGV, err := schema.ParseGroupVersion(controller.APIVersion)
-	if err != nil {
-		return false
-	}
+		controllerGV, err := schema.ParseGroupVersion(controller.APIVersion)
+		if err != nil {
+			return false
+		}
 
-	if owner.GetObjectKind() == schema.EmptyObjectKind {
-		return false
+		if owner.GetObjectKind() == schema.EmptyObjectKind {
+			return false
+		}
+		return controllerGV.Group == owner.GetObjectKind().GroupVersionKind().Group && controller.Name == owner.GetName()
+	} else {
+		annotations := obj.GetAnnotations()
+
+		ownerGroupKind := schema.ParseGroupKind(annotations[osdkHandler.TypeAnnotation])
+		if !gkutil.IsApplication(ownerGroupKind) {
+			return false
+		}
+
+		if ownerNamespacedName, ok := annotations[osdkHandler.NamespacedNameAnnotation]; ok {
+			return ownerNamespacedName == types.NamespacedName{Namespace: owner.GetNamespace(), Name: owner.GetName()}.String()
+		} else {
+			return false
+		}
 	}
-	return controllerGV.Group == owner.GetObjectKind().GroupVersionKind().Group && controller.Name == owner.GetName()
 }
