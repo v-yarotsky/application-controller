@@ -546,6 +546,26 @@ var _ = Describe("Application controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(hasPrometheus).To(BeTrue())
 	}, SpecTimeout(5*time.Second))
+
+	It("Should remove ingress when disabled", func(ctx SpecContext) {
+		imageRef := registry.MustUpsertTag("app11", "latest")
+		app := makeApp("app11", imageRef)
+		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+
+		name := mkName(app.Namespace, app.Name)
+		var ing networkingv1.Ingress
+
+		By("Creating the role bindings")
+		EventuallyGetObject(ctx, name, &ing)
+
+		By("Updating the Application")
+		EventuallyUpdateApp(ctx, &app, func() {
+			app.Spec.Ingress = nil
+		})
+
+		By("Eventually removing the ingress")
+		EventuallyNotFindObject(ctx, name, &ing)
+	}, SpecTimeout(5*time.Second))
 })
 
 func EventuallyGetObject(ctx context.Context, name types.NamespacedName, obj client.Object, matchFns ...func(g Gomega)) {

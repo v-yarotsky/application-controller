@@ -771,88 +771,117 @@ func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotsky
 	name := namer.IngressName()
 	log := log.FromContext(ctx).WithValues("ingressname", name.String())
 
-	if app.Spec.Ingress == nil {
-		log.Info("Application does not specify Ingress, skipping Ingress creation.")
-		return nil
+	var ing networkingv1.Ingress
+	found := false
+	if err := r.Client.Get(ctx, name, &ing); err != nil {
+		if !apierrors.IsNotFound(err) {
+			log.Error(err, "failed to fetch Ingress")
+			return err
+		}
+	} else {
+		found = true
 	}
 
-	portName := app.Spec.Ingress.PortName
-	if portName == "" {
-		for _, p := range app.Spec.Ports {
-			if p.Name == "http" {
-				portName = "http"
-				break
+	if found && !objectIsOwnedBy(&ing, app) {
+		err := fmt.Errorf("Ingress %s is not owned by the Application; refusing to reconcile!", name)
+		log.Error(err, "failed to reconcile the Ingress")
+		return err
+	}
+
+	if app.Spec.Ingress != nil {
+		if !found || found && objectIsOwnedBy(&ing, app) {
+			portName := app.Spec.Ingress.PortName
+			if portName == "" {
+				for _, p := range app.Spec.Ports {
+					if p.Name == "http" {
+						portName = "http"
+						break
+					}
+				}
 			}
-		}
-	}
-	if portName == "" {
-		return fmt.Errorf(`Could not find the port for Ingress. Either specify one explicitly, or ensure there's a port named "http" or "web"`)
-	}
-	pathType := networkingv1.PathTypeImplementationSpecific
+			if portName == "" {
+				return fmt.Errorf(`Could not find the port for Ingress. Either specify one explicitly, or ensure there's a port named "http" or "web"`)
+			}
+			pathType := networkingv1.PathTypeImplementationSpecific
 
-	ingressClassName := app.Spec.Ingress.IngressClassName
-	if ingressClassName == nil {
-		if r.DefaultIngressClassName == "" {
-			return fmt.Errorf("ingress.ingressClassName is not specified, and --ingress-class is not set.")
-		}
-		ingressClassName = ptr.To(r.DefaultIngressClassName)
-	}
+			ingressClassName := app.Spec.Ingress.IngressClassName
+			if ingressClassName == nil {
+				if r.DefaultIngressClassName == "" {
+					return fmt.Errorf("ingress.ingressClassName is not specified, and --ingress-class is not set.")
+				}
+				ingressClassName = ptr.To(r.DefaultIngressClassName)
+			}
 
-	ing := networkingv1.Ingress{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name.Name,
-			Namespace: name.Namespace,
-		},
-	}
+			ing.ObjectMeta.Name = name.Name
+			ing.ObjectMeta.Namespace = name.Namespace
 
-	result, err := controllerutil.CreateOrPatch(ctx, r.Client, &ing, func() error {
-		ing.ObjectMeta.Annotations = r.DefaultIngressAnnotations
+			result, err := controllerutil.CreateOrPatch(ctx, r.Client, &ing, func() error {
+				ing.ObjectMeta.Annotations = r.DefaultIngressAnnotations
 
-		ing.Spec.IngressClassName = ingressClassName
-		ing.Spec.Rules = []networkingv1.IngressRule{
-			{
-				Host: app.Spec.Ingress.Host,
-				IngressRuleValue: networkingv1.IngressRuleValue{
-					HTTP: &networkingv1.HTTPIngressRuleValue{
-						Paths: []networkingv1.HTTPIngressPath{
-							{
-								Path:     "/",
-								PathType: &pathType,
-								Backend: networkingv1.IngressBackend{
-									Service: &networkingv1.IngressServiceBackend{
-										Name: namer.ServiceName().Name,
-										Port: networkingv1.ServiceBackendPort{
-											Name: portName,
+				ing.Spec.IngressClassName = ingressClassName
+				ing.Spec.Rules = []networkingv1.IngressRule{
+					{
+						Host: app.Spec.Ingress.Host,
+						IngressRuleValue: networkingv1.IngressRuleValue{
+							HTTP: &networkingv1.HTTPIngressRuleValue{
+								Paths: []networkingv1.HTTPIngressPath{
+									{
+										Path:     "/",
+										PathType: &pathType,
+										Backend: networkingv1.IngressBackend{
+											Service: &networkingv1.IngressServiceBackend{
+												Name: namer.ServiceName().Name,
+												Port: networkingv1.ServiceBackendPort{
+													Name: portName,
+												},
+											},
 										},
 									},
 								},
 							},
 						},
 					},
-				},
-			},
-		}
-		if err := controllerutil.SetControllerReference(app, &ing, r.Scheme); err != nil {
-			log.Error(err, "failed to set controller reference on Ingress")
-			return err
-		}
-		return nil
-	})
+				}
+				if err := controllerutil.SetControllerReference(app, &ing, r.Scheme); err != nil {
+					log.Error(err, "failed to set controller reference on Ingress")
+					return err
+				}
+				return nil
+			})
 
-	if err != nil {
-		log.Error(err, "failed to create/update the Ingress")
-		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventIngressUpsertFailed, "Could not upsert Ingress %s: %s", name, err)
-		return fmt.Errorf("failed to upsert Ingress %s: %w", name, err)
+			if err != nil {
+				log.Error(err, "failed to create/update the Ingress")
+				r.Recorder.Eventf(app, corev1.EventTypeWarning, EventIngressUpsertFailed, "Could not upsert Ingress %s: %s", name, err)
+				return fmt.Errorf("failed to upsert Ingress %s: %w", name, err)
+			}
+
+			switch result {
+			case controllerutil.OperationResultCreated:
+				log.Info("Created Ingress")
+				r.Recorder.Eventf(app, corev1.EventTypeNormal, EventIngressCreated, "Ingress %s has been created", name)
+			case controllerutil.OperationResultUpdated:
+				log.Info("Updated Ingress")
+				r.Recorder.Eventf(app, corev1.EventTypeNormal, EventIngressUpdated, "Ingress %s has been updated", name)
+			}
+		}
+
+	} else {
+		if found {
+			// delete
+			err := r.Client.Delete(ctx, &ing)
+			if err != nil {
+				err = fmt.Errorf("failed to delete Ingress %s: %w", name, err)
+				log.Error(err, "")
+				r.Recorder.Eventf(app, corev1.EventTypeWarning, EventIngressUpsertFailed, "%s", err.Error())
+				return err
+			}
+			return nil
+		} else {
+			log.Info("Application does not specify Ingress, skipping Ingress creation.")
+			return nil
+		}
 	}
 
-	switch result {
-	case controllerutil.OperationResultCreated:
-		log.Info("Created Ingress")
-		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventIngressCreated, "Ingress %s has been created", name)
-	case controllerutil.OperationResultUpdated:
-		log.Info("Updated Ingress")
-		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventIngressUpdated, "Ingress %s has been updated", name)
-	}
 	return nil
 }
 
@@ -1020,4 +1049,21 @@ func addToMap[K comparable, V any](m map[K]V, key K, value V) map[K]V {
 	}
 	m[key] = value
 	return m
+}
+
+func objectIsOwnedBy(obj client.Object, owner client.Object) bool {
+	controller := metav1.GetControllerOf(obj)
+	if controller == nil {
+		return false
+	}
+
+	controllerGV, err := schema.ParseGroupVersion(controller.APIVersion)
+	if err != nil {
+		return false
+	}
+
+	if owner.GetObjectKind() == schema.EmptyObjectKind {
+		return false
+	}
+	return controllerGV.Group == owner.GetObjectKind().GroupVersionKind().Group && controller.Name == owner.GetName()
 }
