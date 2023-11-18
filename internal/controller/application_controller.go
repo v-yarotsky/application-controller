@@ -58,7 +58,20 @@ const (
 	EventImageUpdated     = "ImageUpdated"
 
 	EventReasonCleanup = "Cleanup"
+
+	FinalizerName = "application.yarotsky.me/finalizer"
+
+	// This is necessary to be able to query a list of RoleBinding objects owned by an Application
+	roleBindingOwnerKey = "metadata.controller"
 )
+
+type eventMap struct {
+	Created      string
+	Updated      string
+	UpsertFailed string
+	Deleted      string
+	DeleteFailed string
+}
 
 var (
 	ClusterRoleBindingEvents = eventMap{
@@ -131,11 +144,6 @@ type ApplicationReconciler struct {
 	Recorder           record.EventRecorder
 	SupportsPrometheus bool
 }
-
-const FinalizerName = "application.yarotsky.me/finalizer"
-
-// This is necessary to be able to query a list of RoleBinding objects owned by an Application
-const roleBindingOwnerKey = "metadata.controller"
 
 //+kubebuilder:rbac:groups=yarotsky.me,resources=applications,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=yarotsky.me,resources=applications/status,verbs=get;update;patch
@@ -472,38 +480,6 @@ func (r *ApplicationReconciler) ensureLBService(ctx context.Context, app *yarots
 	)
 }
 
-func reconcilePorts(actual []corev1.ServicePort, desired []corev1.ServicePort) []corev1.ServicePort {
-	if len(actual) == 0 {
-		return desired
-	}
-
-	desiredPortsByName := make(map[string]corev1.ServicePort, len(desired))
-	seen := make(map[string]bool, len(desired))
-
-	for _, p := range desired {
-		desiredPortsByName[p.Name] = p
-	}
-
-	result := make([]corev1.ServicePort, 0, len(desired))
-	for _, got := range actual {
-		if want, ok := desiredPortsByName[got.Name]; ok {
-			got.TargetPort = want.TargetPort
-			got.Protocol = want.Protocol
-			result = append(result, got)
-			seen[got.Name] = true
-		}
-	}
-
-	for _, want := range desired {
-		if seen[want.Name] {
-			continue
-		}
-		result = append(result, want)
-	}
-
-	return result
-}
-
 func (r *ApplicationReconciler) ensurePodMonitor(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	log := log.FromContext(ctx)
 
@@ -529,12 +505,50 @@ func (r *ApplicationReconciler) ensurePodMonitor(ctx context.Context, app *yarot
 	)
 }
 
-type eventMap struct {
-	Created      string
-	Updated      string
-	UpsertFailed string
-	Deleted      string
-	DeleteFailed string
+func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+	var ing networkingv1.Ingress
+	mutator := &ingressMutator{
+		DefaultIngressAnnotations: r.DefaultIngressAnnotations,
+		DefaultIngressClassName:   r.DefaultIngressClassName,
+		namer:                     namer,
+	}
+
+	return r.ensureResource(
+		ctx,
+		app,
+		namer.IngressName(),
+		&ing,
+		mutator.Mutate(ctx, app, &ing),
+		app.Spec.Ingress != nil,
+		IngressEvents,
+	)
+}
+
+func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+	ownedClusterRoleBindings, err := r.getOwnedClusterRoleBindings(ctx, namer)
+	if err != nil {
+		return err
+	}
+
+	for _, crb := range ownedClusterRoleBindings {
+		if err := r.ensureNoResource(ctx, app, types.NamespacedName{Name: crb.Name}, &crb, ClusterRoleBindingEvents); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (r *ApplicationReconciler) getOwnedClusterRoleBindings(ctx context.Context, namer Namer) ([]rbacv1.ClusterRoleBinding, error) {
+	log := log.FromContext(ctx)
+
+	ownedClusterRoleBindings := &rbacv1.ClusterRoleBindingList{}
+	err := r.Client.List(ctx, ownedClusterRoleBindings, client.MatchingFields(map[string]string{roleBindingOwnerKey: namer.ApplicationName().String()}))
+	if err != nil {
+		log.Error(err, "failed to get the list of owned ClusterRoleBinding objects")
+		return nil, err
+	}
+	return ownedClusterRoleBindings.Items, nil
 }
 
 func (r *ApplicationReconciler) ensureResource(
@@ -563,14 +577,14 @@ func (r *ApplicationReconciler) ensureResource(
 		found = true
 	}
 
-	if found && !r.objectIsOwnedBy(obj, app) {
+	if found && !r.isObjectOwnedBy(obj, app) {
 		err := fmt.Errorf("%s %s is not owned by the Application; refusing to reconcile!", gvk, name)
 		log.Error(err, "")
 		return err
 	}
 
 	if wanted {
-		if !found || found && r.objectIsOwnedBy(obj, app) {
+		if !found || found && r.isObjectOwnedBy(obj, app) {
 			obj.SetName(name.Name)
 			obj.SetNamespace(name.Namespace)
 
@@ -636,52 +650,6 @@ func (r *ApplicationReconciler) ensureNoResource(ctx context.Context, app *yarot
 		false,
 		events,
 	)
-}
-
-func (r *ApplicationReconciler) ensureIngress(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
-	var ing networkingv1.Ingress
-	mutator := &ingressMutator{
-		DefaultIngressAnnotations: r.DefaultIngressAnnotations,
-		DefaultIngressClassName:   r.DefaultIngressClassName,
-		namer:                     namer,
-	}
-
-	return r.ensureResource(
-		ctx,
-		app,
-		namer.IngressName(),
-		&ing,
-		mutator.Mutate(ctx, app, &ing),
-		app.Spec.Ingress != nil,
-		IngressEvents,
-	)
-}
-
-func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
-	ownedClusterRoleBindings, err := r.getOwnedClusterRoleBindings(ctx, namer)
-	if err != nil {
-		return err
-	}
-
-	for _, crb := range ownedClusterRoleBindings {
-		if err := r.ensureNoResource(ctx, app, types.NamespacedName{Name: crb.Name}, &crb, ClusterRoleBindingEvents); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (r *ApplicationReconciler) getOwnedClusterRoleBindings(ctx context.Context, namer Namer) ([]rbacv1.ClusterRoleBinding, error) {
-	log := log.FromContext(ctx)
-
-	ownedClusterRoleBindings := &rbacv1.ClusterRoleBindingList{}
-	err := r.Client.List(ctx, ownedClusterRoleBindings, client.MatchingFields(map[string]string{roleBindingOwnerKey: namer.ApplicationName().String()}))
-	if err != nil {
-		log.Error(err, "failed to get the list of owned ClusterRoleBinding objects")
-		return nil, err
-	}
-	return ownedClusterRoleBindings.Items, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -803,15 +771,7 @@ func (r *ApplicationReconciler) updateStatusWithError(ctx context.Context, app *
 	return result, errors.Join(err, statusErr)
 }
 
-func addToMap[K comparable, V any](m map[K]V, key K, value V) map[K]V {
-	if m == nil {
-		m = make(map[K]V)
-	}
-	m[key] = value
-	return m
-}
-
-func (r *ApplicationReconciler) objectIsOwnedBy(obj client.Object, owner client.Object) bool {
+func (r *ApplicationReconciler) isObjectOwnedBy(obj client.Object, owner client.Object) bool {
 	if namespaced, err := apiutil.IsObjectNamespaced(obj, r.Scheme, r.RESTMapper()); err == nil && namespaced {
 		controller := metav1.GetControllerOf(obj)
 		if controller == nil {

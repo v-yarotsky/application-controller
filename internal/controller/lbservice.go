@@ -42,3 +42,11 @@ func (f *lbServiceMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.A
 		return nil
 	}
 }
+
+func addToMap[K comparable, V any](m map[K]V, key K, value V) map[K]V {
+	if m == nil {
+		m = make(map[K]V)
+	}
+	m[key] = value
+	return m
+}
