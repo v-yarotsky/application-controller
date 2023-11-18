@@ -13,6 +13,10 @@ type lbServiceMutator struct {
 	namer Namer
 }
 
+var (
+	ErrUnknownLBServicePort = fmt.Errorf("loadBalancer specifies an unknown port name")
+)
+
 func (f *lbServiceMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.Application, svc *corev1.Service) func() error {
 	return func() error {
 		lb := app.Spec.LoadBalancer
@@ -24,7 +28,7 @@ func (f *lbServiceMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.A
 		ports := make([]corev1.ServicePort, 0, len(lb.PortNames))
 		for _, n := range lb.PortNames {
 			if p, ok := appPortsByName[n]; !ok {
-				return fmt.Errorf("loadBalancer specifies an unknown port name %q", n)
+				return fmt.Errorf("%w: %q", ErrUnknownLBServicePort, n)
 			} else {
 				ports = append(ports, corev1.ServicePort{
 					Name:       p.Name,
