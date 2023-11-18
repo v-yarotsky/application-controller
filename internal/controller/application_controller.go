@@ -26,7 +26,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -237,135 +236,67 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 }
 
 func (r *ApplicationReconciler) ensureDeployment(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) (*appsv1.Deployment, error) {
-	name := namer.DeploymentName()
-	log := log.FromContext(ctx).WithValues("deploymentname", name.String())
+	log := log.FromContext(ctx)
 
-	deploy := appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name.Name,
-			Namespace: name.Namespace,
-		},
+	var deploy appsv1.Deployment
+	mutator := &deploymentMutator{
+		namer:       namer,
+		imageFinder: r.ImageFinder,
 	}
 
-	imgRef, err := r.ImageFinder.FindImage(ctx, app.Spec.Image)
+	err := r.ensureResource(
+		ctx,
+		app,
+		namer,
+		namer.DeploymentName(),
+		&deploy,
+		mutator.Mutate(ctx, app, &deploy),
+		true,
+		eventMap{
+			Created:      EventDeploymentCreated,
+			Updated:      EventDeploymentUpdated,
+			UpsertFailed: EventDeploymentUpsertFailed,
+		},
+	)
+
 	if err != nil {
-		log.Error(err, "failed to find the latest version of the image")
-		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventImageCheckFailed, "New image version check failed: %s", err.Error())
+		if errors.Is(err, ErrImageCheckFailed) {
+			log.Error(err, "")
+			r.Recorder.Eventf(app, corev1.EventTypeWarning, EventImageCheckFailed, "New image version check failed: %s", err.Error())
+		}
 		return nil, err
 	}
 
-	result, err := controllerutil.CreateOrPatch(ctx, r.Client, &deploy, func() error {
-		selectorLabels := namer.SelectorLabels()
+	oldImage := app.Status.Image
+	newImage := deploy.Spec.Template.Spec.Containers[0].Image
+	if oldImage != newImage {
+		log.Info("Updated container image", "oldimage", oldImage, "newimage", newImage)
+		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventImageUpdated, "Updating image %s -> %s", oldImage, newImage)
 
-		deploy.Spec.Selector = &metav1.LabelSelector{
-			MatchLabels: selectorLabels,
-		}
-
-		deploy.Spec.Template.ObjectMeta = metav1.ObjectMeta{
-			Labels: selectorLabels,
-		}
-
-		podTemplateSpec := &deploy.Spec.Template.Spec
-		podTemplateSpec.ServiceAccountName = namer.ServiceAccountName().Name
-
-		vols := make([]corev1.Volume, 0, len(app.Spec.Volumes))
-		for _, v := range app.Spec.Volumes {
-			vols = append(vols, v.Volume)
-		}
-		podTemplateSpec.Volumes = vols
-
-		var container *corev1.Container
-		if len(podTemplateSpec.Containers) == 0 {
-			podTemplateSpec.Containers = []corev1.Container{{}}
-		}
-		container = &podTemplateSpec.Containers[0]
-
-		container.Name = app.Name
-		if container.Image != imgRef.String() {
-			log.Info("Updating container image", "oldimage", container.Image, "newimage", imgRef.String())
-			r.Recorder.Eventf(app, corev1.EventTypeNormal, EventImageUpdated, "Updating image %s -> %s", container.Image, imgRef)
-			app.Status.Image = imgRef.String()
-			app.Status.ImageLastUpdateTime = metav1.Now()
-		}
-		container.Image = imgRef.String()
-		container.ImagePullPolicy = "Always"
-		container.Command = app.Spec.Command
-		container.Args = app.Spec.Args
-		container.Env = app.Spec.Env
-		container.Ports = app.Spec.Ports
-		container.Resources = app.Spec.Resources
-		container.LivenessProbe = app.Spec.LivenessProbe
-		container.ReadinessProbe = app.Spec.ReadinessProbe
-		container.StartupProbe = app.Spec.StartupProbe
-		container.SecurityContext = app.Spec.SecurityContext
-
-		mounts := make([]corev1.VolumeMount, 0, len(app.Spec.Volumes))
-		for _, v := range app.Spec.Volumes {
-			mounts = append(mounts, corev1.VolumeMount{
-				Name:      v.Name,
-				MountPath: v.MountPath,
-			})
-		}
-		container.VolumeMounts = mounts
-
-		if err := controllerutil.SetControllerReference(app, &deploy, r.Scheme); err != nil {
-			log.Error(err, "failed to set controller reference on Deployment")
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		log.Error(err, "failed to create/update the Deployment")
-		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventDeploymentUpsertFailed, "Could not upsert Deployment %s: %s", name, err)
-		return nil, fmt.Errorf("failed up upsert deployment: %w", err)
-	}
-
-	switch result {
-	case controllerutil.OperationResultCreated:
-		log.Info("Created Deployment")
-		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventDeploymentCreated, "Deployment %s has been created", name)
-	case controllerutil.OperationResultUpdated:
-		log.Info("Updated Deployment")
-		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventDeploymentUpdated, "Deployment %s has been updated", name)
+		app.Status.Image = newImage
+		app.Status.ImageLastUpdateTime = metav1.Now()
 	}
 
 	return &deploy, nil
 }
 
 func (r *ApplicationReconciler) ensureServiceAccount(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
-	name := namer.ServiceAccountName()
-	log := log.FromContext(ctx).WithValues("serviceaccountname", name.String())
-
 	var sa corev1.ServiceAccount
-	sa = corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name.Name,
-			Namespace: name.Namespace,
+
+	return r.ensureResource(
+		ctx,
+		app,
+		namer,
+		namer.ServiceAccountName(),
+		&sa,
+		func() error { return nil },
+		true,
+		eventMap{
+			Created:      EventServiceAccountCreated,
+			Updated:      EventServiceAccountUpdated,
+			UpsertFailed: EventServiceAccountUpsertFailed,
 		},
-	}
-
-	result, err := controllerutil.CreateOrPatch(ctx, r.Client, &sa, func() error {
-		if err := controllerutil.SetControllerReference(app, &sa, r.Scheme); err != nil {
-			log.Error(err, "failed to set controller reference on ServiceAccount")
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		log.Error(err, "failed to create/update the ServiceAccount")
-		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventServiceAccountUpsertFailed, "Could not upsert service account %s: %s", name, err)
-		return fmt.Errorf("failed to upsert ServiceAccount: %w", err)
-	}
-
-	switch result {
-	case controllerutil.OperationResultCreated:
-		log.Info("Created ServiceAccount")
-		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventServiceAccountCreated, "ServiceAccount %s has been created", name)
-	case controllerutil.OperationResultUpdated:
-		log.Info("Updated ServiceAccount")
-		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventServiceAccountUpdated, "ServiceAccount %s has been updated", name)
-	}
-	return nil
+	)
 }
 
 func (r *ApplicationReconciler) ensureRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
@@ -551,51 +482,25 @@ func (r *ApplicationReconciler) ensureClusterRoleBindings(ctx context.Context, a
 }
 
 func (r *ApplicationReconciler) ensureService(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
-	name := namer.ServiceName()
-	log := log.FromContext(ctx).WithValues("servicename", name.String())
+	var svc corev1.Service
+	mutator := &serviceMutator{
+		namer: namer,
+	}
 
-	svc := corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name.Name,
-			Namespace: name.Namespace,
+	return r.ensureResource(
+		ctx,
+		app,
+		namer,
+		namer.ServiceName(),
+		&svc,
+		mutator.Mutate(ctx, app, &svc),
+		true,
+		eventMap{
+			Created:      EventIngressCreated,
+			Updated:      EventIngressUpdated,
+			UpsertFailed: EventIngressUpsertFailed,
 		},
-	}
-
-	ports := make([]corev1.ServicePort, 0, len(app.Spec.Ports))
-	for _, p := range app.Spec.Ports {
-		ports = append(ports, corev1.ServicePort{
-			Name:       p.Name,
-			TargetPort: intstr.FromString(p.Name),
-			Protocol:   p.Protocol,
-			Port:       p.ContainerPort,
-		})
-	}
-
-	result, err := controllerutil.CreateOrPatch(ctx, r.Client, &svc, func() error {
-		svc.Spec.Ports = reconcilePorts(svc.Spec.Ports, ports)
-		svc.Spec.Selector = namer.SelectorLabels()
-		if err := controllerutil.SetControllerReference(app, &svc, r.Scheme); err != nil {
-			log.Error(err, "failed to set controller reference on Service")
-			return err
-		}
-		return nil
-	})
-
-	if err != nil {
-		log.Error(err, "failed to create/update the Service")
-		r.Recorder.Eventf(app, corev1.EventTypeWarning, EventServiceUpsertFailed, "Could not upsert Service %s: %s", name, err)
-		return fmt.Errorf("failed to upsert Service %s: %w", name, err)
-	}
-
-	switch result {
-	case controllerutil.OperationResultCreated:
-		log.Info("Created Service")
-		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventServiceCreated, "Service %s has been created", name)
-	case controllerutil.OperationResultUpdated:
-		log.Info("Updated Service")
-		r.Recorder.Eventf(app, corev1.EventTypeNormal, EventServiceUpdated, "Service %s has been updated", name)
-	}
-	return nil
+	)
 }
 
 func (r *ApplicationReconciler) ensureLBService(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
