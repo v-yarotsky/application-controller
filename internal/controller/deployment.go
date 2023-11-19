@@ -38,8 +38,6 @@ func (f *deploymentMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.
 		podTemplateSpec := &deploy.Spec.Template.Spec
 		podTemplateSpec.ServiceAccountName = f.namer.ServiceAccountName().Name
 
-		podTemplateSpec.SecurityContext = app.Spec.PodSecurityContext
-
 		vols := make([]corev1.Volume, 0, len(app.Spec.Volumes))
 		for _, v := range app.Spec.Volumes {
 			vols = append(vols, v.Volume)
@@ -72,6 +70,17 @@ func (f *deploymentMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.
 			})
 		}
 		container.VolumeMounts = mounts
+
+		if sc := app.Spec.SecurityContext; sc != nil {
+			container.SecurityContext = sc.SecurityContext
+
+			podTemplateSpec.SecurityContext = &corev1.PodSecurityContext{
+				SupplementalGroups:  sc.SupplementalGroups,
+				FSGroup:             sc.FSGroup,
+				Sysctls:             sc.Sysctls,
+				FSGroupChangePolicy: sc.FSGroupChangePolicy,
+			}
+		}
 
 		return nil
 	}

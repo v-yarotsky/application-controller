@@ -103,8 +103,8 @@ type ApplicationSpec struct {
 	// +optional
 	StartupProbe *corev1.Probe `json:"startupProbe,omitempty"`
 
-	// PodSecurityContext holds pod-level security attributes and container settings.
-	PodSecurityContext *corev1.PodSecurityContext `json:"podSecurityContext,omitempty"`
+	// SecurityContext holds pod-level security attributes and container settings.
+	SecurityContext *SecurityContext `json:"securityContext,omitempty"`
 
 	// List of volumes to mount into the primary container.
 	// More info: https://kubernetes.io/docs/concepts/storage/volumes
@@ -171,6 +171,50 @@ type VersionStrategySemVerSpec struct {
 	// - `~1.2` (equivalent to `>= 1.2.0 < 2.0.0`
 	// - `^1.2.3` (equivalent to `>= 1.2.3 < 2.0.0`
 	Constraint string `json:"constraint"`
+}
+
+// SecurityContext is amalgamation of corev1.SecurityContext and corev1.PodSecurityContext,
+// which overlap, but aren't the same.
+type SecurityContext struct {
+	*corev1.SecurityContext `json:",inline"`
+
+	// A list of groups applied to the first process run in each container, in addition
+	// to the container's primary GID, the fsGroup (if specified), and group memberships
+	// defined in the container image for the uid of the container process. If unspecified,
+	// no additional groups are added to any container. Note that group memberships
+	// defined in the container image for the uid of the container process are still effective,
+	// even if they are not included in this list.
+	// Note that this field cannot be set when spec.os.name is windows.
+	// +optional
+	SupplementalGroups []int64 `json:"supplementalGroups,omitempty" protobuf:"varint,4,rep,name=supplementalGroups"`
+
+	// A special supplemental group that applies to all containers in a pod.
+	// Some volume types allow the Kubelet to change the ownership of that volume
+	// to be owned by the pod:
+	//
+	// 1. The owning GID will be the FSGroup
+	// 2. The setgid bit is set (new files created in the volume will be owned by FSGroup)
+	// 3. The permission bits are OR'd with rw-rw----
+	//
+	// If unset, the Kubelet will not modify the ownership and permissions of any volume.
+	// Note that this field cannot be set when spec.os.name is windows.
+	// +optional
+	FSGroup *int64 `json:"fsGroup,omitempty" protobuf:"varint,5,opt,name=fsGroup"`
+
+	// Sysctls hold a list of namespaced sysctls used for the pod. Pods with unsupported
+	// sysctls (by the container runtime) might fail to launch.
+	// Note that this field cannot be set when spec.os.name is windows.
+	// +optional
+	Sysctls []corev1.Sysctl `json:"sysctls,omitempty" protobuf:"bytes,7,rep,name=sysctls"`
+	// fsGroupChangePolicy defines behavior of changing ownership and permission of the volume
+	// before being exposed inside Pod. This field will only apply to
+	// volume types which support fsGroup based ownership(and permissions).
+	// It will have no effect on ephemeral volume types such as: secret, configmaps
+	// and emptydir.
+	// Valid values are "OnRootMismatch" and "Always". If not specified, "Always" is used.
+	// Note that this field cannot be set when spec.os.name is windows.
+	// +optional
+	FSGroupChangePolicy *corev1.PodFSGroupChangePolicy `json:"fsGroupChangePolicy,omitempty" protobuf:"bytes,9,opt,name=fsGroupChangePolicy"`
 }
 
 // RoleBindingScope determines whether a namespaced RoleBinding
