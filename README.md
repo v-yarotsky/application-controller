@@ -158,7 +158,6 @@ In addition to the above metrics, the following metrics are instrumented:
 - [X] Add prometheus metrics
 - [X] Prune Ingress, Service (LoadBalancer) when `ingress` or `loadBalancer` are removed.
 - [X] Allow specifying a mixture of container SecurityContext and PodSecurityContext (rather, allow setting `fsGroup` on pod template level)
-- [ ] Fix some remaining race conditions
 - [ ] Validating admission webhook? Or at least write tests to make sure we have nice error messages
 
 ## Getting Started
