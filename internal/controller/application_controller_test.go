@@ -205,9 +205,21 @@ var _ = Describe("Application controller", func() {
 			g.Expect(mainContainer.Image).To(Equal(imageRef.String()))
 			g.Expect(mainContainer.Ports).To(HaveLen(3))
 			g.Expect(mainContainer.Ports).To(ContainElements(
-				corev1.ContainerPort{ContainerPort: 8080, Name: "http", Protocol: corev1.ProtocolTCP},
-				corev1.ContainerPort{ContainerPort: 8192, Name: "metrics", Protocol: corev1.ProtocolTCP},
-				corev1.ContainerPort{ContainerPort: 22000, Name: "listen-udp", Protocol: corev1.ProtocolUDP},
+				SatisfyAll(
+					HaveField("Name", "http"),
+					HaveField("ContainerPort", int32(8080)),
+					HaveField("Protocol", corev1.ProtocolTCP),
+				),
+				SatisfyAll(
+					HaveField("Name", "metrics"),
+					HaveField("ContainerPort", int32(8192)),
+					HaveField("Protocol", corev1.ProtocolTCP),
+				),
+				SatisfyAll(
+					HaveField("Name", "listen-udp"),
+					HaveField("ContainerPort", int32(22000)),
+					HaveField("Protocol", corev1.ProtocolUDP),
+				),
 			))
 			g.Expect(mainContainer.VolumeMounts).To(ContainElement(corev1.VolumeMount{
 				Name:      "data",

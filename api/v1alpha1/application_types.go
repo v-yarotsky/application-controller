@@ -132,6 +132,13 @@ type ApplicationSpec struct {
 	// +patchMergeKey=name
 	// +patchStrategy=merge,retainKeys
 	Roles []ScopedRoleRef `json:"roles,omitempty"`
+
+	// Use the host's network namespace.
+	// If this option is set, the ports that will be used must be specified.
+	// Default to false.
+	// +k8s:conversion-gen=false
+	// +optional
+	HostNetwork bool `json:"hostNetwork,omitempty" protobuf:"varint,11,opt,name=hostNetwork"`
 }
 
 type ImageSpec struct {

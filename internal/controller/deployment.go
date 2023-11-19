@@ -38,6 +38,14 @@ func (f *deploymentMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.
 		podTemplateSpec := &deploy.Spec.Template.Spec
 		podTemplateSpec.ServiceAccountName = f.namer.ServiceAccountName().Name
 
+		if app.Spec.HostNetwork {
+			podTemplateSpec.HostNetwork = true
+
+			// To have DNS options set along with hostNetwork, you have to specify DNS policy
+			// explicitly to 'ClusterFirstWithHostNet'.
+			podTemplateSpec.DNSPolicy = corev1.DNSClusterFirstWithHostNet
+		}
+
 		vols := make([]corev1.Volume, 0, len(app.Spec.Volumes))
 		for _, v := range app.Spec.Volumes {
 			vols = append(vols, v.Volume)
@@ -56,7 +64,7 @@ func (f *deploymentMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.
 		container.Command = app.Spec.Command
 		container.Args = app.Spec.Args
 		container.Env = app.Spec.Env
-		container.Ports = app.Spec.Ports
+		container.Ports = reconcileContainerPorts(container.Ports, app.Spec.Ports)
 		container.Resources = app.Spec.Resources
 		container.LivenessProbe = app.Spec.LivenessProbe
 		container.ReadinessProbe = app.Spec.ReadinessProbe
@@ -84,4 +92,36 @@ func (f *deploymentMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.
 
 		return nil
 	}
+}
+
+func reconcileContainerPorts(actual []corev1.ContainerPort, desired []corev1.ContainerPort) []corev1.ContainerPort {
+	if len(actual) == 0 {
+		return desired
+	}
+
+	desiredPortsByName := make(map[string]corev1.ContainerPort, len(desired))
+	seen := make(map[string]bool, len(desired))
+
+	for _, p := range desired {
+		desiredPortsByName[p.Name] = p
+	}
+
+	result := make([]corev1.ContainerPort, 0, len(desired))
+	for _, got := range actual {
+		if want, ok := desiredPortsByName[got.Name]; ok {
+			got.ContainerPort = want.ContainerPort
+			got.Protocol = want.Protocol
+			result = append(result, got)
+			seen[got.Name] = true
+		}
+	}
+
+	for _, want := range desired {
+		if seen[want.Name] {
+			continue
+		}
+		result = append(result, want)
+	}
+
+	return result
 }

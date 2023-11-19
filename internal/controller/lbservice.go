@@ -41,7 +41,7 @@ func (f *lbServiceMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.A
 
 		svc.Annotations = addToMap[string, string](svc.Annotations, ExternalDNSHostnameAnnotation, lb.Host)
 		svc.Spec.Type = corev1.ServiceTypeLoadBalancer
-		svc.Spec.Ports = reconcilePorts(svc.Spec.Ports, ports)
+		svc.Spec.Ports = reconcileServicePorts(svc.Spec.Ports, ports)
 		svc.Spec.Selector = f.namer.SelectorLabels()
 		return nil
 	}

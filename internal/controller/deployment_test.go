@@ -68,4 +68,26 @@ func TestDeploymentMutator(t *testing.T) {
 		assert.Equal(t, int64(1000), *deploy.Spec.Template.Spec.SecurityContext.FSGroup)
 		assert.Equal(t, int64(1000), *deploy.Spec.Template.Spec.Containers[0].SecurityContext.RunAsUser)
 	})
+
+	t.Run(`sets pod's hostNetwork to false when hostNetwork is unset`, func(t *testing.T) {
+		app := makeApp()
+
+		var deploy appsv1.Deployment
+		err := makeMutator(&app).Mutate(context.TODO(), &app, &deploy)()
+		assert.NoError(t, err)
+
+		assert.False(t, deploy.Spec.Template.Spec.HostNetwork)
+	})
+
+	t.Run(`sets the Pod's DNS policy to "ClusterFirstWithHostNet" when hostNetwork is set`, func(t *testing.T) {
+		app := makeApp()
+		app.Spec.HostNetwork = true
+
+		var deploy appsv1.Deployment
+		err := makeMutator(&app).Mutate(context.TODO(), &app, &deploy)()
+		assert.NoError(t, err)
+
+		assert.True(t, deploy.Spec.Template.Spec.HostNetwork)
+		assert.Equal(t, corev1.DNSClusterFirstWithHostNet, deploy.Spec.Template.Spec.DNSPolicy)
+	})
 }

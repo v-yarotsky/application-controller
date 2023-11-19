@@ -24,13 +24,13 @@ func (f *serviceMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.App
 			})
 		}
 
-		svc.Spec.Ports = reconcilePorts(svc.Spec.Ports, ports)
+		svc.Spec.Ports = reconcileServicePorts(svc.Spec.Ports, ports)
 		svc.Spec.Selector = f.namer.SelectorLabels()
 		return nil
 	}
 }
 
-func reconcilePorts(actual []corev1.ServicePort, desired []corev1.ServicePort) []corev1.ServicePort {
+func reconcileServicePorts(actual []corev1.ServicePort, desired []corev1.ServicePort) []corev1.ServicePort {
 	if len(actual) == 0 {
 		return desired
 	}
