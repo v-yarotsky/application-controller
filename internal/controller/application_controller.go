@@ -363,7 +363,8 @@ func (r *ApplicationReconciler) reconcileClusterRoleBindings(ctx context.Context
 func (r *ApplicationReconciler) reconcileService(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	var svc corev1.Service
 	mutator := &serviceMutator{namer: namer}
-	return r.ensureResource(ctx, app, namer.ServiceName(), &svc, mutator.Mutate(ctx, app, &svc), ServiceEvents)
+	wanted := len(app.Spec.Ports) > 0
+	return r.reconcileResource(ctx, app, namer.ServiceName(), &svc, mutator.Mutate(ctx, app, &svc), wanted, ServiceEvents)
 }
 
 func (r *ApplicationReconciler) reconcileLBService(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
