@@ -58,6 +58,16 @@ func TestDeploymentMutator(t *testing.T) {
 		}
 	}
 
+	t.Run(`sets DeployStrategy to Recreate`, func(t *testing.T) {
+		app := makeApp()
+
+		var deploy appsv1.Deployment
+		err := makeMutator(&app).Mutate(context.TODO(), &app, &deploy)()
+		assert.NoError(t, err)
+
+		assert.Equal(t, appsv1.RecreateDeploymentStrategyType, deploy.Spec.Strategy.Type)
+	})
+
 	t.Run(`sets SecurityContext settings on the Pod and the Container`, func(t *testing.T) {
 		app := makeApp()
 

@@ -31,6 +31,8 @@ func (f *deploymentMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.
 			MatchLabels: selectorLabels,
 		}
 
+		deploy.Spec.Strategy.Type = appsv1.RecreateDeploymentStrategyType
+
 		deploy.Spec.Template.ObjectMeta = metav1.ObjectMeta{
 			Labels: selectorLabels,
 		}
