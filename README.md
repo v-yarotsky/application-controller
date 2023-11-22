@@ -90,16 +90,10 @@ spec:
       cpu: "100m"
     limits:
       cpu: "250m"
-  livenessProbe:
+  probe:
     httpGet:
       path: "/healthz"
-  readinessProbe:
-    httpGet:
-      path: "/healthz"
-  startupProbe:
-    httpGet:
-      path: "/healthz"
-  podSecurityContext:
+  securityContext:
     runAsUser: 1000
     runAsGroup: 1000
   volumes:

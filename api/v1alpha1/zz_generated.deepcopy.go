@@ -112,18 +112,8 @@ func (in *ApplicationSpec) DeepCopyInto(out *ApplicationSpec) {
 		}
 	}
 	in.Resources.DeepCopyInto(&out.Resources)
-	if in.LivenessProbe != nil {
-		in, out := &in.LivenessProbe, &out.LivenessProbe
-		*out = new(v1.Probe)
-		(*in).DeepCopyInto(*out)
-	}
-	if in.ReadinessProbe != nil {
-		in, out := &in.ReadinessProbe, &out.ReadinessProbe
-		*out = new(v1.Probe)
-		(*in).DeepCopyInto(*out)
-	}
-	if in.StartupProbe != nil {
-		in, out := &in.StartupProbe, &out.StartupProbe
+	if in.Probe != nil {
+		in, out := &in.Probe, &out.Probe
 		*out = new(v1.Probe)
 		(*in).DeepCopyInto(*out)
 	}

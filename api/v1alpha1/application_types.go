@@ -79,29 +79,12 @@ type ApplicationSpec struct {
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 
-	// Periodic probe of container liveness.
-	// Container will be restarted if the probe fails.
+	// Periodic probe of container liveness/readiness.
+	// Container won't be put in service unless the probe passes, and will be restarted if the probe fails.
 	// Cannot be updated.
 	// More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes
 	// +optional
-	LivenessProbe *corev1.Probe `json:"livenessProbe,omitempty"`
-
-	// Periodic probe of container service readiness.
-	// Container will be removed from service endpoints if the probe fails.
-	// Cannot be updated.
-	// More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes
-	// +optional
-	ReadinessProbe *corev1.Probe `json:"readinessProbe,omitempty"`
-
-	// StartupProbe indicates that the Pod has successfully initialized.
-	// If specified, no other probes are executed until this completes successfully.
-	// If this probe fails, the Pod will be restarted, just as if the livenessProbe failed.
-	// This can be used to provide different probe parameters at the beginning of a Pod's lifecycle,
-	// when it might take a long time to load data or warm a cache, than during steady-state operation.
-	// This cannot be updated.
-	// More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes
-	// +optional
-	StartupProbe *corev1.Probe `json:"startupProbe,omitempty"`
+	Probe *corev1.Probe `json:"livenessProbe,omitempty"`
 
 	// SecurityContext holds pod-level security attributes and container settings.
 	SecurityContext *SecurityContext `json:"securityContext,omitempty"`

@@ -68,9 +68,8 @@ func (f *deploymentMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.
 		container.Env = app.Spec.Env
 		container.Ports = reconcileContainerPorts(container.Ports, app.Spec.Ports)
 		container.Resources = app.Spec.Resources
-		container.LivenessProbe = app.Spec.LivenessProbe
-		container.ReadinessProbe = app.Spec.ReadinessProbe
-		container.StartupProbe = app.Spec.StartupProbe
+		container.LivenessProbe = app.Spec.Probe
+		container.ReadinessProbe = app.Spec.Probe
 
 		mounts := make([]corev1.VolumeMount, 0, len(app.Spec.Volumes))
 		for _, v := range app.Spec.Volumes {
