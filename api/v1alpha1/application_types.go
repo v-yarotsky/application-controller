@@ -35,7 +35,7 @@ type ApplicationSpec struct {
 	// cannot be resolved, the reference in the input string will be unchanged. Double $$ are reduced
 	// to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e. "$$(VAR_NAME)" will
 	// produce the string literal "$(VAR_NAME)". Escaped references will never be expanded, regardless
-	// of whether the variable exists or not. Cannot be updated.
+	// of whether the variable exists or not.
 	// More info: https://kubernetes.io/docs/tasks/inject-data-application/define-command-argument-container/#running-a-command-in-a-shell
 	// +optional
 	Command []string `json:"command,omitempty"`
@@ -46,7 +46,7 @@ type ApplicationSpec struct {
 	// cannot be resolved, the reference in the input string will be unchanged. Double $$ are reduced
 	// to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e. "$$(VAR_NAME)" will
 	// produce the string literal "$(VAR_NAME)". Escaped references will never be expanded, regardless
-	// of whether the variable exists or not. Cannot be updated.
+	// of whether the variable exists or not.
 	// More info: https://kubernetes.io/docs/tasks/inject-data-application/define-command-argument-container/#running-a-command-in-a-shell
 	// +optional
 	Args []string `json:"args,omitempty"`
@@ -57,7 +57,6 @@ type ApplicationSpec struct {
 	// accessible from the network.
 	// Modifying this array with strategic merge patch may corrupt the data.
 	// For more information See https://github.com/kubernetes/kubernetes/issues/108255.
-	// Cannot be updated.
 	// +optional
 	// +patchMergeKey=containerPort
 	// +patchStrategy=merge
@@ -67,21 +66,26 @@ type ApplicationSpec struct {
 	Ports []corev1.ContainerPort `json:"ports,omitempty" patchStrategy:"merge" patchMergeKey:"containerPort"`
 
 	// List of environment variables to set in the container.
-	// Cannot be updated.
 	// +optional
 	// +patchMergeKey=name
 	// +patchStrategy=merge
 	Env []corev1.EnvVar `json:"env,omitempty" patchStrategy:"merge" patchMergeKey:"name"`
 
+	// List of sources to populate environment variables in the container.
+	// The keys defined within a source must be a C_IDENTIFIER. All invalid keys
+	// will be reported as an event when the container is starting. When a key exists in multiple
+	// sources, the value associated with the last source will take precedence.
+	// Values defined by an Env with a duplicate key will take precedence.
+	// +optional
+	EnvFrom []corev1.EnvFromSource `json:"envFrom,omitempty"`
+
 	// Compute Resources required by this container.
-	// Cannot be updated.
 	// More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
 	// +optional
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 
 	// Periodic probe of container liveness/readiness.
 	// Container won't be put in service unless the probe passes, and will be restarted if the probe fails.
-	// Cannot be updated.
 	// More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes
 	// +optional
 	Probe *corev1.Probe `json:"livenessProbe,omitempty"`
@@ -121,7 +125,7 @@ type ApplicationSpec struct {
 	// Default to false.
 	// +k8s:conversion-gen=false
 	// +optional
-	HostNetwork bool `json:"hostNetwork,omitempty" protobuf:"varint,11,opt,name=hostNetwork"`
+	HostNetwork bool `json:"hostNetwork,omitempty"`
 }
 
 type ImageSpec struct {
@@ -176,7 +180,7 @@ type SecurityContext struct {
 	// even if they are not included in this list.
 	// Note that this field cannot be set when spec.os.name is windows.
 	// +optional
-	SupplementalGroups []int64 `json:"supplementalGroups,omitempty" protobuf:"varint,4,rep,name=supplementalGroups"`
+	SupplementalGroups []int64 `json:"supplementalGroups,omitempty"`
 
 	// A special supplemental group that applies to all containers in a pod.
 	// Some volume types allow the Kubelet to change the ownership of that volume
@@ -189,13 +193,13 @@ type SecurityContext struct {
 	// If unset, the Kubelet will not modify the ownership and permissions of any volume.
 	// Note that this field cannot be set when spec.os.name is windows.
 	// +optional
-	FSGroup *int64 `json:"fsGroup,omitempty" protobuf:"varint,5,opt,name=fsGroup"`
+	FSGroup *int64 `json:"fsGroup,omitempty"`
 
 	// Sysctls hold a list of namespaced sysctls used for the pod. Pods with unsupported
 	// sysctls (by the container runtime) might fail to launch.
 	// Note that this field cannot be set when spec.os.name is windows.
 	// +optional
-	Sysctls []corev1.Sysctl `json:"sysctls,omitempty" protobuf:"bytes,7,rep,name=sysctls"`
+	Sysctls []corev1.Sysctl `json:"sysctls,omitempty"`
 	// fsGroupChangePolicy defines behavior of changing ownership and permission of the volume
 	// before being exposed inside Pod. This field will only apply to
 	// volume types which support fsGroup based ownership(and permissions).
@@ -204,7 +208,7 @@ type SecurityContext struct {
 	// Valid values are "OnRootMismatch" and "Always". If not specified, "Always" is used.
 	// Note that this field cannot be set when spec.os.name is windows.
 	// +optional
-	FSGroupChangePolicy *corev1.PodFSGroupChangePolicy `json:"fsGroupChangePolicy,omitempty" protobuf:"bytes,9,opt,name=fsGroupChangePolicy"`
+	FSGroupChangePolicy *corev1.PodFSGroupChangePolicy `json:"fsGroupChangePolicy,omitempty"`
 }
 
 // RoleBindingScope determines whether a namespaced RoleBinding

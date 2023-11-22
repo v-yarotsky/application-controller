@@ -9,7 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 )
 
@@ -48,35 +50,110 @@ func TestDeploymentMutator(t *testing.T) {
 				Namespace: "default",
 			},
 			Spec: yarotskymev1alpha1.ApplicationSpec{
+				Image: yarotskymev1alpha1.ImageSpec{
+					Repository: "registry.example.com/foo/bar",
+				},
+				Command: []string{"/mycommand"},
+				Args:    []string{"myarg"},
+				Env: []corev1.EnvVar{
+					{
+						Name:  "MYENVVAR",
+						Value: "MYENVVARVALUE",
+					},
+				},
+				EnvFrom: []corev1.EnvFromSource{
+					{
+						ConfigMapRef: &corev1.ConfigMapEnvSource{
+							LocalObjectReference: corev1.LocalObjectReference{
+								Name: "myconfigmap",
+							},
+						},
+					},
+				},
+				Ports: []corev1.ContainerPort{
+					{
+						Name:          "http",
+						ContainerPort: 8080,
+						Protocol:      corev1.ProtocolTCP,
+					},
+				},
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						"cpu": resource.MustParse("100m"),
+					},
+				},
+				Probe: &corev1.Probe{
+					ProbeHandler: corev1.ProbeHandler{
+						HTTPGet: &corev1.HTTPGetAction{
+							Path: "/myprobe",
+							Port: intstr.FromString("http"),
+						},
+					},
+				},
 				SecurityContext: &yarotskymev1alpha1.SecurityContext{
 					SecurityContext: &corev1.SecurityContext{
 						RunAsUser: ptr.To(int64(1000)),
 					},
 					FSGroup: ptr.To(int64(1000)),
 				},
+				Volumes: []yarotskymev1alpha1.Volume{
+					{
+						Volume: corev1.Volume{
+							Name: "myvolume",
+							VolumeSource: corev1.VolumeSource{
+								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+									ClaimName: "mypvc",
+								},
+							},
+						},
+						MountPath: "/myvolume",
+					},
+				},
 			},
 		}
 	}
 
-	t.Run(`sets DeployStrategy to Recreate`, func(t *testing.T) {
+	t.Run(`creates a Deployment using the Application spec`, func(t *testing.T) {
 		app := makeApp()
 
 		var deploy appsv1.Deployment
 		err := makeMutator(&app).Mutate(context.TODO(), &app, &deploy)()
 		assert.NoError(t, err)
 
+		assert.Equal(t, &metav1.LabelSelector{
+			MatchLabels: map[string]string{
+				"app.kubernetes.io/instance":   "default",
+				"app.kubernetes.io/managed-by": "application-controller",
+				"app.kubernetes.io/name":       "myapp",
+			},
+		}, deploy.Spec.Selector)
 		assert.Equal(t, appsv1.RecreateDeploymentStrategyType, deploy.Spec.Strategy.Type)
-	})
 
-	t.Run(`sets SecurityContext settings on the Pod and the Container`, func(t *testing.T) {
-		app := makeApp()
+		podSpec := deploy.Spec.Template.Spec
+		assert.Equal(t, "myapp", podSpec.ServiceAccountName)
+		assert.Len(t, podSpec.Volumes, len(app.Spec.Volumes))
+		assert.Equal(t, app.Spec.Volumes[0].Name, podSpec.Volumes[0].Name)
+		assert.Equal(t, app.Spec.Volumes[0].Volume.PersistentVolumeClaim.ClaimName, podSpec.Volumes[0].VolumeSource.PersistentVolumeClaim.ClaimName)
+		assert.Equal(t, app.Spec.SecurityContext.FSGroup, podSpec.SecurityContext.FSGroup)
 
-		var deploy appsv1.Deployment
-		err := makeMutator(&app).Mutate(context.TODO(), &app, &deploy)()
-		assert.NoError(t, err)
+		assert.Len(t, podSpec.Containers, 1)
+		containerSpec := podSpec.Containers[0]
+		assert.Equal(t, app.Name, containerSpec.Name)
+		assert.Equal(t, "registry.example.com/foo/bar:foo@sha256:00000000000000000000000000000000", containerSpec.Image)
+		assert.Equal(t, corev1.PullAlways, containerSpec.ImagePullPolicy)
+		assert.Equal(t, app.Spec.Command, containerSpec.Command)
+		assert.Equal(t, app.Spec.Args, containerSpec.Args)
+		assert.Equal(t, app.Spec.Env, containerSpec.Env)
+		assert.Equal(t, app.Spec.EnvFrom, containerSpec.EnvFrom)
+		assert.Equal(t, app.Spec.Ports, containerSpec.Ports)
+		assert.Equal(t, app.Spec.Resources, containerSpec.Resources)
+		assert.Equal(t, app.Spec.Probe, containerSpec.LivenessProbe)
+		assert.Equal(t, app.Spec.Probe, containerSpec.ReadinessProbe)
+		assert.Equal(t, app.Spec.SecurityContext.SecurityContext, containerSpec.SecurityContext)
 
-		assert.Equal(t, int64(1000), *deploy.Spec.Template.Spec.SecurityContext.FSGroup)
-		assert.Equal(t, int64(1000), *deploy.Spec.Template.Spec.Containers[0].SecurityContext.RunAsUser)
+		assert.Len(t, containerSpec.VolumeMounts, len(app.Spec.Volumes))
+		assert.Equal(t, app.Spec.Volumes[0].MountPath, containerSpec.VolumeMounts[0].MountPath)
+		assert.Equal(t, app.Spec.Volumes[0].Volume.Name, containerSpec.VolumeMounts[0].Name)
 	})
 
 	t.Run(`sets pod's hostNetwork to false when hostNetwork is unset`, func(t *testing.T) {

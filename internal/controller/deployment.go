@@ -62,10 +62,11 @@ func (f *deploymentMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.
 
 		container.Name = app.Name
 		container.Image = imgRef.String()
-		container.ImagePullPolicy = "Always"
+		container.ImagePullPolicy = corev1.PullAlways
 		container.Command = app.Spec.Command
 		container.Args = app.Spec.Args
 		container.Env = app.Spec.Env
+		container.EnvFrom = app.Spec.EnvFrom
 		container.Ports = reconcileContainerPorts(container.Ports, app.Spec.Ports)
 		container.Resources = app.Spec.Resources
 		container.LivenessProbe = app.Spec.Probe

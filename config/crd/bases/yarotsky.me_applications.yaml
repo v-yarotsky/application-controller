@@ -52,8 +52,7 @@ spec:
                   Double $$ are reduced to a single $, which allows for escaping the
                   $(VAR_NAME) syntax: i.e. "$$(VAR_NAME)" will produce the string
                   literal "$(VAR_NAME)". Escaped references will never be expanded,
-                  regardless of whether the variable exists or not. Cannot be updated.
-                  More info: https://kubernetes.io/docs/tasks/inject-data-application/define-command-argument-container/#running-a-command-in-a-shell'
+                  regardless of whether the variable exists or not. More info: https://kubernetes.io/docs/tasks/inject-data-application/define-command-argument-container/#running-a-command-in-a-shell'
                 items:
                   type: string
                 type: array
@@ -65,14 +64,13 @@ spec:
                   will be unchanged. Double $$ are reduced to a single $, which allows
                   for escaping the $(VAR_NAME) syntax: i.e. "$$(VAR_NAME)" will produce
                   the string literal "$(VAR_NAME)". Escaped references will never
-                  be expanded, regardless of whether the variable exists or not. Cannot
-                  be updated. More info: https://kubernetes.io/docs/tasks/inject-data-application/define-command-argument-container/#running-a-command-in-a-shell'
+                  be expanded, regardless of whether the variable exists or not. More
+                  info: https://kubernetes.io/docs/tasks/inject-data-application/define-command-argument-container/#running-a-command-in-a-shell'
                 items:
                   type: string
                 type: array
               env:
                 description: List of environment variables to set in the container.
-                  Cannot be updated.
                 items:
                   description: EnvVar represents an environment variable present in
                     a Container.
@@ -180,6 +178,46 @@ spec:
                   - name
                   type: object
                 type: array
+              envFrom:
+                description: List of sources to populate environment variables in
+                  the container. The keys defined within a source must be a C_IDENTIFIER.
+                  All invalid keys will be reported as an event when the container
+                  is starting. When a key exists in multiple sources, the value associated
+                  with the last source will take precedence. Values defined by an
+                  Env with a duplicate key will take precedence.
+                items:
+                  description: EnvFromSource represents the source of a set of ConfigMaps
+                  properties:
+                    configMapRef:
+                      description: The ConfigMap to select from
+                      properties:
+                        name:
+                          description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            TODO: Add other useful fields. apiVersion, kind, uid?'
+                          type: string
+                        optional:
+                          description: Specify whether the ConfigMap must be defined
+                          type: boolean
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    prefix:
+                      description: An optional identifier to prepend to each key in
+                        the ConfigMap. Must be a C_IDENTIFIER.
+                      type: string
+                    secretRef:
+                      description: The Secret to select from
+                      properties:
+                        name:
+                          description: 'Name of the referent. More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            TODO: Add other useful fields. apiVersion, kind, uid?'
+                          type: string
+                        optional:
+                          description: Specify whether the Secret must be defined
+                          type: boolean
+                      type: object
+                      x-kubernetes-map-type: atomic
+                  type: object
+                type: array
               hostNetwork:
                 description: Use the host's network namespace. If this option is set,
                   the ports that will be used must be specified. Default to false.
@@ -260,7 +298,7 @@ spec:
               livenessProbe:
                 description: 'Periodic probe of container liveness/readiness. Container
                   won''t be put in service unless the probe passes, and will be restarted
-                  if the probe fails. Cannot be updated. More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes'
+                  if the probe fails. More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes'
                 properties:
                   exec:
                     description: Exec specifies the action to take.
@@ -440,7 +478,6 @@ spec:
                   which is listening on the default "0.0.0.0" address inside a container
                   will be accessible from the network. Modifying this array with strategic
                   merge patch may corrupt the data. For more information See https://github.com/kubernetes/kubernetes/issues/108255.
-                  Cannot be updated.
                 items:
                   description: ContainerPort represents a network port in a single
                     container.
@@ -480,8 +517,8 @@ spec:
                 - protocol
                 x-kubernetes-list-type: map
               resources:
-                description: 'Compute Resources required by this container. Cannot
-                  be updated. More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
+                description: 'Compute Resources required by this container. More info:
+                  https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/'
                 properties:
                   claims:
                     description: "Claims lists the names of resources, defined in
