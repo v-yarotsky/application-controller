@@ -177,4 +177,22 @@ func TestDeploymentMutator(t *testing.T) {
 		assert.True(t, deploy.Spec.Template.Spec.HostNetwork)
 		assert.Equal(t, corev1.DNSClusterFirstWithHostNet, deploy.Spec.Template.Spec.DNSPolicy)
 	})
+
+	t.Run(`does not keep overwriting defaults for Probes`, func(t *testing.T) {
+		app := makeApp()
+		app.Spec.HostNetwork = true
+
+		var deploy appsv1.Deployment
+		err := makeMutator(&app).Mutate(context.TODO(), &app, &deploy)()
+		assert.NoError(t, err)
+
+		// simulate a default set by k8s
+		deploy.Spec.Template.Spec.Containers[0].LivenessProbe.HTTPGet.Scheme = corev1.URISchemeHTTP
+
+		// re-mutate
+		err = makeMutator(&app).Mutate(context.TODO(), &app, &deploy)()
+		assert.NoError(t, err)
+
+		assert.Equal(t, corev1.URISchemeHTTP, deploy.Spec.Template.Spec.Containers[0].LivenessProbe.HTTPGet.Scheme)
+	})
 }

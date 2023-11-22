@@ -10,6 +10,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	appsv1k "k8s.io/kubernetes/pkg/apis/apps/v1"
 )
 
 type deploymentMutator struct {
@@ -92,6 +93,7 @@ func (f *deploymentMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.
 			}
 		}
 
+		appsv1k.SetObjectDefaults_Deployment(deploy)
 		return nil
 	}
 }

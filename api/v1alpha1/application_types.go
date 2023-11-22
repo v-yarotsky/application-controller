@@ -88,7 +88,7 @@ type ApplicationSpec struct {
 	// Container won't be put in service unless the probe passes, and will be restarted if the probe fails.
 	// More info: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle#container-probes
 	// +optional
-	Probe *corev1.Probe `json:"livenessProbe,omitempty"`
+	Probe *corev1.Probe `json:"probe,omitempty"`
 
 	// SecurityContext holds pod-level security attributes and container settings.
 	SecurityContext *SecurityContext `json:"securityContext,omitempty"`
