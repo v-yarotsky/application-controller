@@ -9,13 +9,11 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
@@ -68,10 +66,6 @@ var _ = Describe("Application controller", func() {
 					},
 				},
 				Ingress: &yarotskymev1alpha1.Ingress{
-					IngressClassName: ptr.To("traefik"),
-					Host:             "dashboard.home.yarotsky.me",
-				},
-				Ingress2: &yarotskymev1alpha1.Ingress{
 					Host: "dashboard.home.yarotsky.me",
 				},
 				LoadBalancer: &yarotskymev1alpha1.LoadBalancer{
@@ -246,38 +240,6 @@ var _ = Describe("Application controller", func() {
 				"app.kubernetes.io/name":       app.Name,
 				"app.kubernetes.io/managed-by": "application-controller",
 				"app.kubernetes.io/instance":   "default",
-			}))
-		})
-
-		By("Creating an Ingress")
-		var ingress networkingv1.Ingress
-		EventuallyGetObject(ctx, mkName(app.Namespace, app.Name), &ingress, func(g Gomega) {
-			g.Expect(*ingress.Spec.IngressClassName).To(Equal("traefik"))
-			g.Expect(ingress.Annotations).To(Equal(map[string]string{
-				"traefik.ingress.kubernetes.io/router.middlewares": "kube-system-foo@kubernetescrd",
-			}))
-
-			pathType := networkingv1.PathTypeImplementationSpecific
-			g.Expect(ingress.Spec.Rules).To(ContainElement(networkingv1.IngressRule{
-				Host: "dashboard.home.yarotsky.me",
-				IngressRuleValue: networkingv1.IngressRuleValue{
-					HTTP: &networkingv1.HTTPIngressRuleValue{
-						Paths: []networkingv1.HTTPIngressPath{
-							{
-								Path:     "/",
-								PathType: &pathType,
-								Backend: networkingv1.IngressBackend{
-									Service: &networkingv1.IngressServiceBackend{
-										Name: serviceName.Name,
-										Port: networkingv1.ServiceBackendPort{
-											Name: "http",
-										},
-									},
-								},
-							},
-						},
-					},
-				},
 			}))
 		})
 
@@ -508,13 +470,13 @@ var _ = Describe("Application controller", func() {
 		By("Setting the conditions after creation")
 		EventuallyHaveCondition(ctx, &app, "Ready", metav1.ConditionUnknown, "Reconciling")
 
-		By("An issue creating an Ingress")
+		By("An issue creating an IngressRoute")
 		EventuallyUpdateApp(ctx, &app, func() {
 			app.Spec.Ingress.Host = "---"
 		})
 
 		By("Setting the Ready status condition to False")
-		EventuallyHaveCondition(ctx, &app, "Ready", metav1.ConditionFalse, "IngressUpsertFailed")
+		EventuallyHaveCondition(ctx, &app, "Ready", metav1.ConditionFalse, "IngressRouteUpsertFailed")
 
 		By("Fixing the ingress")
 		EventuallyUpdateApp(ctx, &app, func() {
@@ -584,15 +546,15 @@ var _ = Describe("Application controller", func() {
 		Expect(hasPrometheus).To(BeTrue())
 	}, SpecTimeout(5*time.Second))
 
-	It("Should remove ingress when disabled", func(ctx SpecContext) {
+	It("Should remove IngressRoute when disabled", func(ctx SpecContext) {
 		imageRef := registry.MustUpsertTag("app11", "latest")
 		app := makeApp("app11", imageRef)
 		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
 
 		name := mkName(app.Namespace, app.Name)
-		var ing networkingv1.Ingress
+		var ing traefikv1alpha1.IngressRoute
 
-		By("Creating the Ingress")
+		By("Creating the IngressRoute")
 		EventuallyGetObject(ctx, name, &ing)
 
 		By("Updating the Application")

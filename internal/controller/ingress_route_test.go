@@ -6,17 +6,15 @@ import (
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
 	"github.com/stretchr/testify/assert"
+	traefikv1alpha1 "github.com/traefik/traefik/v2/pkg/provider/kubernetes/crd/traefikio/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 )
 
-func TestIngressMutator(t *testing.T) {
-	makeMutator := func(app *yarotskymev1alpha1.Application) *ingressMutator {
-		return &ingressMutator{
-			DefaultIngressClassName:   "myingressclass",
+func TestIngressRouteMutator(t *testing.T) {
+	makeMutator := func(app *yarotskymev1alpha1.Application) *ingressRouteMutator {
+		return &ingressRouteMutator{
 			DefaultTraefikMiddlewares: []string{"https-redirect"},
 			namer:                     &simpleNamer{app},
 		}
@@ -43,52 +41,19 @@ func TestIngressMutator(t *testing.T) {
 		}
 	}
 
-	t.Run(`uses given default ingressClassName and traefik middlewares`, func(t *testing.T) {
-		app := makeApp()
-
-		var ing networkingv1.Ingress
-		err := makeMutator(&app).Mutate(context.TODO(), &app, &ing)()
-		assert.NoError(t, err)
-
-		assert.Equal(t, "myingressclass", *ing.Spec.IngressClassName)
-		assert.Equal(t, map[string]string{
-			"traefik.ingress.kubernetes.io/router.middlewares": "kube-system-https-redirect@kubernetescrd",
-		}, ing.Annotations)
-	})
-
 	t.Run(`allows overriding traefik middlewares`, func(t *testing.T) {
 		app := makeApp()
 		app.Spec.Ingress.TraefikMiddlewares = []string{"https-redirect", "forward-auth"}
 
-		var ing networkingv1.Ingress
+		var ing traefikv1alpha1.IngressRoute
 		err := makeMutator(&app).Mutate(context.TODO(), &app, &ing)()
 		assert.NoError(t, err)
 
-		assert.Equal(t, map[string]string{
-			"traefik.ingress.kubernetes.io/router.middlewares": "kube-system-https-redirect@kubernetescrd,kube-system-forward-auth@kubernetescrd",
-		}, ing.Annotations)
-	})
-
-	t.Run(`allows overriding ingressClassName`, func(t *testing.T) {
-		app := makeApp()
-		app.Spec.Ingress.IngressClassName = ptr.To("myotheringressclass")
-
-		var ing networkingv1.Ingress
-		err := makeMutator(&app).Mutate(context.TODO(), &app, &ing)()
-		assert.NoError(t, err)
-
-		assert.Equal(t, "myotheringressclass", *ing.Spec.IngressClassName)
-	})
-
-	t.Run(`fails without default ingress class when none provided explicitly`, func(t *testing.T) {
-		app := makeApp()
-
-		var ing networkingv1.Ingress
-		mutator := makeMutator(&app)
-		mutator.DefaultIngressClassName = ""
-
-		err := mutator.Mutate(context.TODO(), &app, &ing)()
-		assert.ErrorIs(t, err, ErrNoIngressClass)
+		assert.Len(t, ing.Spec.Routes[0].Middlewares, 2)
+		assert.Equal(t, ing.Spec.Routes[0].Middlewares[0].Namespace, "kube-system")
+		assert.Equal(t, ing.Spec.Routes[0].Middlewares[0].Name, "https-redirect")
+		assert.Equal(t, ing.Spec.Routes[0].Middlewares[1].Namespace, "kube-system")
+		assert.Equal(t, ing.Spec.Routes[0].Middlewares[1].Name, "forward-auth")
 	})
 
 	t.Run(`uses port "http" by default`, func(t *testing.T) {
@@ -99,11 +64,11 @@ func TestIngressMutator(t *testing.T) {
 		})
 		app.Spec.Ingress.PortName = ""
 
-		var ing networkingv1.Ingress
+		var ing traefikv1alpha1.IngressRoute
 		err := makeMutator(&app).Mutate(context.TODO(), &app, &ing)()
 		assert.NoError(t, err)
 
-		assert.Equal(t, "http", ing.Spec.Rules[0].IngressRuleValue.HTTP.Paths[0].Backend.Service.Port.Name)
+		assert.Equal(t, "http", ing.Spec.Routes[0].Services[0].Port.StrVal)
 	})
 
 	t.Run(`uses port "web" by default`, func(t *testing.T) {
@@ -114,29 +79,30 @@ func TestIngressMutator(t *testing.T) {
 		})
 		app.Spec.Ingress.PortName = ""
 
-		var ing networkingv1.Ingress
+		var ing traefikv1alpha1.IngressRoute
 		err := makeMutator(&app).Mutate(context.TODO(), &app, &ing)()
 		assert.NoError(t, err)
 
-		assert.Equal(t, "web", ing.Spec.Rules[0].IngressRuleValue.HTTP.Paths[0].Backend.Service.Port.Name)
+		assert.Equal(t, "web", ing.Spec.Routes[0].Services[0].Port.StrVal)
 	})
 
 	t.Run(`fails if no port is specified or inferred`, func(t *testing.T) {
 		app := makeApp()
 		app.Spec.Ingress.PortName = ""
 
-		var ing networkingv1.Ingress
+		var ing traefikv1alpha1.IngressRoute
 		err := makeMutator(&app).Mutate(context.TODO(), &app, &ing)()
-		assert.ErrorIs(t, err, ErrNoIngressPort)
+		assert.ErrorIs(t, err, ErrNoIngressRoutePort)
 	})
 
 	t.Run(`points at the service`, func(t *testing.T) {
 		app := makeApp()
 
-		var ing networkingv1.Ingress
+		var ing traefikv1alpha1.IngressRoute
 		err := makeMutator(&app).Mutate(context.TODO(), &app, &ing)()
 		assert.NoError(t, err)
 
-		assert.Equal(t, "myapp", ing.Spec.Rules[0].IngressRuleValue.HTTP.Paths[0].Backend.Service.Name)
+		assert.Equal(t, app.Namespace, ing.Spec.Routes[0].Services[0].Namespace)
+		assert.Equal(t, "myapp", ing.Spec.Routes[0].Services[0].Name)
 	})
 }

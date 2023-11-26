@@ -46,7 +46,6 @@ import (
 	traefikv1alpha1 "github.com/traefik/traefik/v2/pkg/provider/kubernetes/crd/traefikio/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -87,14 +86,6 @@ var (
 		Created:      "DeploymentCreated",
 		Updated:      "DeploymentUpdated",
 		UpsertFailed: "DeploymentUpsertFailed",
-	}
-
-	IngressEvents = eventMap{
-		Created:      "IngressCreated",
-		Updated:      "IngressUpdated",
-		UpsertFailed: "IngressUpsertFailed",
-		Deleted:      "IngressDeleted",
-		DeleteFailed: "IngressDeleteFailed",
 	}
 
 	IngressRouteEvents = eventMap{
@@ -161,7 +152,6 @@ type ApplicationReconciler struct {
 //+kubebuilder:rbac:groups=apps,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=traefik.io,resources=ingressroutes,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=traefik.io,resources=ingressroutetcps,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=traefik.io,resources=ingressrouteudps,verbs=get;list;watch;create;update;patch;delete
@@ -254,11 +244,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.updateStatusWithError(ctx, &app, err, PodMonitorEvents.UpsertFailed)
 	}
 
-	if err := r.reconcileIngress(ctx, &app, namer); err != nil {
-		return r.updateStatusWithError(ctx, &app, err, IngressEvents.UpsertFailed)
-	}
-
-	if err := r.reconcileIngress2(ctx, &app, namer); err != nil {
+	if err := r.reconcileIngressRoute(ctx, &app, namer); err != nil {
 		return r.updateStatusWithError(ctx, &app, err, IngressRouteEvents.UpsertFailed)
 	}
 
@@ -404,18 +390,7 @@ func (r *ApplicationReconciler) reconcilePodMonitor(ctx context.Context, app *ya
 	return r.reconcileResource(ctx, app, namer.PodMonitorName(), &mon, mutator.Mutate(ctx, app, &mon), wanted, PodMonitorEvents)
 }
 
-func (r *ApplicationReconciler) reconcileIngress(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
-	var ing networkingv1.Ingress
-	mutator := &ingressMutator{
-		DefaultIngressClassName:   "traefik",
-		DefaultTraefikMiddlewares: r.DefaultTraefikMiddlewares,
-		namer:                     namer,
-	}
-	wanted := app.Spec.Ingress != nil
-	return r.reconcileResource(ctx, app, namer.IngressName(), &ing, mutator.Mutate(ctx, app, &ing), wanted, IngressEvents)
-}
-
-func (r *ApplicationReconciler) reconcileIngress2(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+func (r *ApplicationReconciler) reconcileIngressRoute(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	log := log.FromContext(ctx)
 
 	if !r.SupportsTraefik {
@@ -424,12 +399,15 @@ func (r *ApplicationReconciler) reconcileIngress2(ctx context.Context, app *yaro
 	}
 
 	var ing traefikv1alpha1.IngressRoute
-	mutator := &ingressMutator2{
+	mutator := &ingressRouteMutator{
 		DefaultTraefikMiddlewares: r.DefaultTraefikMiddlewares,
 		namer:                     namer,
 	}
-	wanted := app.Spec.Ingress2 != nil
-	return r.reconcileResource(ctx, app, namer.IngressName(), &ing, mutator.Mutate(ctx, app, &ing), wanted, IngressRouteEvents)
+	if app.Spec.Ingress2 != nil && app.Spec.Ingress == nil {
+		app.Spec.Ingress = app.Spec.Ingress2
+	}
+	wanted := app.Spec.Ingress != nil
+	return r.reconcileResource(ctx, app, namer.IngressRouteName(), &ing, mutator.Mutate(ctx, app, &ing), wanted, IngressRouteEvents)
 }
 
 func (r *ApplicationReconciler) reconcileDeployment(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) (*appsv1.Deployment, error) {
@@ -628,7 +606,6 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ServiceAccount{}).
-		Owns(&networkingv1.Ingress{}).
 		Owns(&rbacv1.RoleBinding{})
 
 	// Reconcile when an "owned" ClusterRoleBinding is changed

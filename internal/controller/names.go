@@ -16,7 +16,7 @@ type Namer interface {
 	ServiceName() types.NamespacedName
 	LBServiceName() types.NamespacedName
 	PodMonitorName() types.NamespacedName
-	IngressName() types.NamespacedName
+	IngressRouteName() types.NamespacedName
 	RoleBindingName(roleRef rbacv1.RoleRef) types.NamespacedName
 	ClusterRoleBindingName(roleRef rbacv1.RoleRef) types.NamespacedName
 
@@ -71,7 +71,7 @@ func (a *simpleNamer) PodMonitorName() types.NamespacedName {
 	}
 }
 
-func (a *simpleNamer) IngressName() types.NamespacedName {
+func (a *simpleNamer) IngressRouteName() types.NamespacedName {
 	return types.NamespacedName{
 		Name:      a.Name,
 		Namespace: a.Namespace,
