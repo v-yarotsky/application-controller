@@ -24,6 +24,7 @@ import (
 	"git.home.yarotsky.me/vlad/application-controller/internal/k8s"
 	"git.home.yarotsky.me/vlad/application-controller/internal/testutil"
 	prometheusv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	traefikv1alpha1 "github.com/traefik/traefik/v2/pkg/provider/kubernetes/crd/traefikcontainous/v1alpha1"
 )
 
 var _ = Describe("Application controller", func() {
@@ -69,6 +70,9 @@ var _ = Describe("Application controller", func() {
 				Ingress: &yarotskymev1alpha1.Ingress{
 					IngressClassName: ptr.To("traefik"),
 					Host:             "dashboard.home.yarotsky.me",
+				},
+				Ingress2: &yarotskymev1alpha1.Ingress{
+					Host: "dashboard.home.yarotsky.me",
 				},
 				LoadBalancer: &yarotskymev1alpha1.LoadBalancer{
 					Host:      "endpoint.home.yarotsky.me",
@@ -250,7 +254,7 @@ var _ = Describe("Application controller", func() {
 		EventuallyGetObject(ctx, mkName(app.Namespace, app.Name), &ingress, func(g Gomega) {
 			g.Expect(*ingress.Spec.IngressClassName).To(Equal("traefik"))
 			g.Expect(ingress.Annotations).To(Equal(map[string]string{
-				"foo": "bar",
+				"traefik.ingress.kubernetes.io/router.middlewares": "kube-system-foo@kubernetescrd",
 			}))
 
 			pathType := networkingv1.PathTypeImplementationSpecific
@@ -272,6 +276,31 @@ var _ = Describe("Application controller", func() {
 								},
 							},
 						},
+					},
+				},
+			}))
+		})
+
+		By("Creating an IngressRoute")
+		var ingressRoute traefikv1alpha1.IngressRoute
+		EventuallyGetObject(ctx, mkName(app.Namespace, app.Name), &ingressRoute, func(g Gomega) {
+			g.Expect(ingressRoute.Spec.Routes).To(ContainElement(traefikv1alpha1.Route{
+				Kind:  "Rule",
+				Match: "Host(`dashboard.home.yarotsky.me`)",
+				Services: []traefikv1alpha1.Service{
+					{
+						LoadBalancerSpec: traefikv1alpha1.LoadBalancerSpec{
+							Kind:      "Service",
+							Namespace: app.Namespace,
+							Name:      app.Name,
+							Port:      intstr.FromString("http"),
+						},
+					},
+				},
+				Middlewares: []traefikv1alpha1.MiddlewareRef{
+					{
+						Namespace: "kube-system",
+						Name:      "foo",
 					},
 				},
 			}))
@@ -354,20 +383,6 @@ var _ = Describe("Application controller", func() {
 
 		EventuallyGetObject(ctx, appName, &app, func(g Gomega) {
 			g.Expect(app.Status.Image).To(Equal(newImageDigestRef.String()))
-		})
-	}, SpecTimeout(5*time.Second))
-
-	It("Should use default ingress class when no explicit ingress class is specified", func(ctx SpecContext) {
-		imageRef := registry.MustUpsertTag("app3", "latest")
-		app := makeApp("app3", imageRef)
-		app.Spec.Ingress.IngressClassName = nil
-
-		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
-
-		By("Creating an Ingress")
-		var ingress networkingv1.Ingress
-		EventuallyGetObject(ctx, mkName(app.Namespace, app.Name), &ingress, func(g Gomega) {
-			g.Expect(*ingress.Spec.IngressClassName).To(Equal("nginx-private"))
 		})
 	}, SpecTimeout(5*time.Second))
 

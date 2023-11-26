@@ -41,6 +41,7 @@ import (
 	"git.home.yarotsky.me/vlad/application-controller/internal/images"
 	"git.home.yarotsky.me/vlad/application-controller/internal/k8s"
 	prometheusv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	traefikv1alpha1 "github.com/traefik/traefik/v2/pkg/provider/kubernetes/crd/traefikcontainous/v1alpha1"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -52,6 +53,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(prometheusv1.AddToScheme(scheme))
+	utilruntime.Must(traefikv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(yarotskymev1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
@@ -61,9 +63,8 @@ func main() {
 	var enableLeaderElection bool
 	var probeAddr string
 	var imagePullSecrets flagext.StringSlice
+	var traefikMiddlewares flagext.StringSlice
 	var defaultUpdateSchedule flagext.CronSchedule = "*/5 * * * * *"
-	var ingressClass string
-	var ingressAnnotations flagext.JSONStringMap
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -71,8 +72,8 @@ func main() {
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.Var(&imagePullSecrets, "image-pull-secret", "name of a Secret with image registry credentials. Can be used multiple times.")
-	flag.StringVar(&ingressClass, "ingress-class", "", "Default IngressClass.")
-	flag.Var(&ingressAnnotations, "ingress-annotations", "JSON object with default Ingress annotations.")
+	flag.Var(&traefikMiddlewares, "traefik-default-middleware", "Traefik middleware namespace/name that is added to IngressRoutes by default, e.g. "+
+		"`kube-system/https-redirect` Can be used multiple times.")
 	flag.Var(&defaultUpdateSchedule, "default-update-schedule", "Default Cron schedule for image update checks (default: `@every 5m`);"+
 		" See https://pkg.go.dev/github.com/robfig/cron#hdr-CRON_Expression_Format")
 
@@ -91,6 +92,15 @@ func main() {
 	}
 	if !hasPrometheus {
 		setupLog.Info("Prometheus operator does not appear to be installed (or the corresponding CRDs are missing). Monitoring will not be automatically setup")
+	}
+
+	hasTraefik, err := k8s.IsTraefikInstalled(nil)
+	if err != nil {
+		setupLog.Error(err, "failed to check presence of Traefik API types")
+		os.Exit(1)
+	}
+	if !hasTraefik {
+		setupLog.Info("Traefik does not appear to be installed (or the corresponding CRDs are missing). Ingress will not be automatically setup")
 	}
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
@@ -135,8 +145,8 @@ func main() {
 		Scheme:                    mgr.GetScheme(),
 		ImageFinder:               imageWatcher,
 		ImageUpdateEvents:         imageUpdateEvents,
-		DefaultIngressClassName:   ingressClass,
-		DefaultIngressAnnotations: ingressAnnotations,
+		DefaultTraefikMiddlewares: traefikMiddlewares,
+		SupportsTraefik:           hasTraefik,
 		SupportsPrometheus:        hasPrometheus,
 		Recorder:                  mgr.GetEventRecorderFor(controller.Name),
 	}).SetupWithManager(mgr); err != nil {

@@ -103,6 +103,9 @@ type ApplicationSpec struct {
 	// +optional
 	Ingress *Ingress `json:"ingress,omitempty"`
 
+	// +optional
+	Ingress2 *Ingress `json:"ingress2,omitempty"`
+
 	// LoadBalancer creates a separate Service with type LoadBalancer,
 	// and exposes specified ports. It supports creating a DNS record
 	// via an external-dns annotation, the value of which is controlled
@@ -284,6 +287,12 @@ type Ingress struct {
 
 	// Guesses `web` or `http` by default.
 	PortName string `json:"portName,omitempty"`
+
+	// traefik middleware names, e.g. "https-redirect".
+	// Middlewares are assumed to:
+	// - be configured via Traefik CRDs, and
+	// - be in `kube-system` namespace.
+	TraefikMiddlewares []string `json:"traefikMiddlewares,omitempty"`
 }
 
 type LoadBalancer struct {

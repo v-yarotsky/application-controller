@@ -41,6 +41,7 @@ import (
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
 	"git.home.yarotsky.me/vlad/application-controller/internal/images"
 	prometheusv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	traefikv1alpha1 "github.com/traefik/traefik/v2/pkg/provider/kubernetes/crd/traefikcontainous/v1alpha1"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -95,6 +96,9 @@ var _ = BeforeSuite(func() {
 	err = prometheusv1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
+	err = traefikv1alpha1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
 	//+kubebuilder:scaffold:scheme
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
@@ -111,16 +115,14 @@ var _ = BeforeSuite(func() {
 
 	imageUpdateEvents = make(chan event.GenericEvent)
 	err = (&ApplicationReconciler{
-		Client:                  k8sManager.GetClient(),
-		Scheme:                  k8sManager.GetScheme(),
-		ImageFinder:             watcher,
-		ImageUpdateEvents:       imageUpdateEvents,
-		DefaultIngressClassName: "nginx-private",
-		DefaultIngressAnnotations: map[string]string{
-			"foo": "bar",
-		},
-		Recorder:           k8sManager.GetEventRecorderFor(Name),
-		SupportsPrometheus: true,
+		Client:                    k8sManager.GetClient(),
+		Scheme:                    k8sManager.GetScheme(),
+		ImageFinder:               watcher,
+		ImageUpdateEvents:         imageUpdateEvents,
+		DefaultTraefikMiddlewares: []string{"foo"},
+		Recorder:                  k8sManager.GetEventRecorderFor(Name),
+		SupportsPrometheus:        true,
+		SupportsTraefik:           true,
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 

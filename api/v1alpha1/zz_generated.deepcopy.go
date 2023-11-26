@@ -141,6 +141,11 @@ func (in *ApplicationSpec) DeepCopyInto(out *ApplicationSpec) {
 		*out = new(Ingress)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Ingress2 != nil {
+		in, out := &in.Ingress2, &out.Ingress2
+		*out = new(Ingress)
+		(*in).DeepCopyInto(*out)
+	}
 	if in.LoadBalancer != nil {
 		in, out := &in.LoadBalancer, &out.LoadBalancer
 		*out = new(LoadBalancer)
@@ -230,6 +235,11 @@ func (in *Ingress) DeepCopyInto(out *Ingress) {
 		in, out := &in.IngressClassName, &out.IngressClassName
 		*out = new(string)
 		**out = **in
+	}
+	if in.TraefikMiddlewares != nil {
+		in, out := &in.TraefikMiddlewares, &out.TraefikMiddlewares
+		*out = make([]string, len(*in))
+		copy(*out, *in)
 	}
 }
 

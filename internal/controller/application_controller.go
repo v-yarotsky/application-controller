@@ -43,6 +43,7 @@ import (
 	"git.home.yarotsky.me/vlad/application-controller/internal/images"
 	"git.home.yarotsky.me/vlad/application-controller/internal/k8s"
 	osdkHandler "github.com/operator-framework/operator-lib/handler"
+	traefikv1alpha1 "github.com/traefik/traefik/v2/pkg/provider/kubernetes/crd/traefikcontainous/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -96,6 +97,14 @@ var (
 		DeleteFailed: "IngressDeleteFailed",
 	}
 
+	IngressRouteEvents = eventMap{
+		Created:      "IngressRouteCreated",
+		Updated:      "IngressRouteUpdated",
+		UpsertFailed: "IngressRouteUpsertFailed",
+		Deleted:      "IngressRouteDeleted",
+		DeleteFailed: "IngressRouteDeleteFailed",
+	}
+
 	RoleBindingEvents = eventMap{
 		Created:      "RoleBindingCreated",
 		Updated:      "RoleBindingUpdated",
@@ -137,12 +146,12 @@ var (
 type ApplicationReconciler struct {
 	ImageFinder               images.ImageFinder
 	ImageUpdateEvents         chan event.GenericEvent
-	DefaultIngressClassName   string
-	DefaultIngressAnnotations map[string]string
+	DefaultTraefikMiddlewares []string
 	client.Client
 	Scheme             *runtime.Scheme
 	Recorder           record.EventRecorder
 	SupportsPrometheus bool
+	SupportsTraefik    bool
 }
 
 //+kubebuilder:rbac:groups=yarotsky.me,resources=applications,verbs=get;list;watch;create;update;patch;delete
@@ -153,6 +162,9 @@ type ApplicationReconciler struct {
 //+kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=networking.k8s.io,resources=ingresses,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=traefik.containo.us,resources=ingressroutes,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=traefik.containo.us,resources=ingressroutetcps,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=traefik.containo.us,resources=ingressrouteudps,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,verbs=bind
@@ -244,6 +256,10 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	if err := r.reconcileIngress(ctx, &app, namer); err != nil {
 		return r.updateStatusWithError(ctx, &app, err, IngressEvents.UpsertFailed)
+	}
+
+	if err := r.reconcileIngress2(ctx, &app, namer); err != nil {
+		return r.updateStatusWithError(ctx, &app, err, IngressRouteEvents.UpsertFailed)
 	}
 
 	if deploy, err := r.reconcileDeployment(ctx, &app, namer); err != nil {
@@ -391,12 +407,29 @@ func (r *ApplicationReconciler) reconcilePodMonitor(ctx context.Context, app *ya
 func (r *ApplicationReconciler) reconcileIngress(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	var ing networkingv1.Ingress
 	mutator := &ingressMutator{
-		DefaultIngressAnnotations: r.DefaultIngressAnnotations,
-		DefaultIngressClassName:   r.DefaultIngressClassName,
+		DefaultIngressClassName:   "traefik",
+		DefaultTraefikMiddlewares: r.DefaultTraefikMiddlewares,
 		namer:                     namer,
 	}
 	wanted := app.Spec.Ingress != nil
 	return r.reconcileResource(ctx, app, namer.IngressName(), &ing, mutator.Mutate(ctx, app, &ing), wanted, IngressEvents)
+}
+
+func (r *ApplicationReconciler) reconcileIngress2(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+	log := log.FromContext(ctx)
+
+	if !r.SupportsTraefik {
+		log.Info("Cluster does not appear to support Traefik; skipping ingress configuration.")
+		return nil
+	}
+
+	var ing traefikv1alpha1.IngressRoute
+	mutator := &ingressMutator2{
+		DefaultTraefikMiddlewares: r.DefaultTraefikMiddlewares,
+		namer:                     namer,
+	}
+	wanted := app.Spec.Ingress2 != nil
+	return r.reconcileResource(ctx, app, namer.IngressName(), &ing, mutator.Mutate(ctx, app, &ing), wanted, IngressRouteEvents)
 }
 
 func (r *ApplicationReconciler) reconcileDeployment(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) (*appsv1.Deployment, error) {
@@ -590,20 +623,34 @@ func (r *ApplicationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&yarotskymev1alpha1.Application{})
 
-	builder.
-		Owns(&appsv1.Deployment{}).                                                                             // Reconcile when an owned Deployment is changed.
-		Owns(&corev1.Service{}).                                                                                // Reconcile when an owned Service is changed.
-		Owns(&corev1.ServiceAccount{}).                                                                         // Reconcile when an owned AccountService is changed.
-		Owns(&networkingv1.Ingress{}).                                                                          // Reconcile when an owned Ingress is changed.
-		Owns(&rbacv1.RoleBinding{}).                                                                            // Reconcile when an owned RoleBinding is changed.
-		Watches(&rbacv1.ClusterRoleBinding{}, &osdkHandler.EnqueueRequestForAnnotation{Type: gvk.GroupKind()}). // Reconcile when an "owner" ClusterRoleBinding is changed		WatchesRawSource(
-		WatchesRawSource(                                                                                       // Reconcile when a new image becomes available for an Application
+	// Reconcile when owned resources are changed.
+	builder = builder.
+		Owns(&appsv1.Deployment{}).
+		Owns(&corev1.Service{}).
+		Owns(&corev1.ServiceAccount{}).
+		Owns(&networkingv1.Ingress{}).
+		Owns(&rbacv1.RoleBinding{})
+
+	// Reconcile when an "owned" ClusterRoleBinding is changed
+	builder = builder.
+		Watches(&rbacv1.ClusterRoleBinding{}, &osdkHandler.EnqueueRequestForAnnotation{Type: gvk.GroupKind()})
+
+	// Reconcile when a new image becomes available for an Application
+	builder = builder.
+		WatchesRawSource(
 			&source.Channel{Source: r.ImageUpdateEvents},
 			&handler.EnqueueRequestForObject{},
 		)
 
 	if r.SupportsPrometheus {
-		builder = builder.Owns(&prometheusv1.PodMonitor{}) // Reconcile when an owned PodMonitor is changed
+		builder = builder.Owns(&prometheusv1.PodMonitor{})
+	}
+
+	if r.SupportsTraefik {
+		builder = builder.
+			Owns(&traefikv1alpha1.IngressRoute{}).
+			Owns(&traefikv1alpha1.IngressRouteTCP{}).
+			Owns(&traefikv1alpha1.IngressRouteUDP{})
 	}
 
 	return builder.Complete(r)

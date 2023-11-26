@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -11,9 +12,13 @@ import (
 
 type ingressMutator struct {
 	DefaultIngressClassName   string
-	DefaultIngressAnnotations map[string]string
+	DefaultTraefikMiddlewares []string
 	namer                     Namer
 }
+
+const (
+	traefikMiddlewaresIngressAnnotation = "traefik.ingress.kubernetes.io/router.middlewares"
+)
 
 var (
 	ErrNoIngressPort  = fmt.Errorf(`Could not find the port for Ingress. Either specify one explicitly, or ensure there's a port named "http" or "web"`)
@@ -48,7 +53,21 @@ func (f *ingressMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.App
 			ingressClassName = ptr.To(f.DefaultIngressClassName)
 		}
 
-		ing.ObjectMeta.Annotations = f.DefaultIngressAnnotations
+		var middlewares []string
+		if ms := app.Spec.Ingress.TraefikMiddlewares; len(ms) > 0 {
+			middlewares = ms
+		} else if ms := f.DefaultTraefikMiddlewares; len(ms) > 0 {
+			middlewares = ms
+		}
+
+		if len(middlewares) > 0 {
+			if ing.ObjectMeta.Annotations == nil {
+				ing.ObjectMeta.Annotations = map[string]string{}
+			}
+			ing.ObjectMeta.Annotations[traefikMiddlewaresIngressAnnotation] = traefikMiddlewaresAnnotationValue(middlewares)
+		} else {
+			delete(ing.ObjectMeta.Annotations, traefikMiddlewaresIngressAnnotation)
+		}
 
 		ing.Spec.IngressClassName = ingressClassName
 		ing.Spec.Rules = []networkingv1.IngressRule{
@@ -76,4 +95,12 @@ func (f *ingressMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.App
 		}
 		return nil
 	}
+}
+
+func traefikMiddlewaresAnnotationValue(middlewares []string) string {
+	tmp := make([]string, len(middlewares))
+	for i, m := range middlewares {
+		tmp[i] = fmt.Sprintf("kube-system-%s@kubernetescrd", m)
+	}
+	return strings.Join(tmp, ",")
 }

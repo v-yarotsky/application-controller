@@ -120,6 +120,42 @@ rules:
   verbs:
   - bind
 - apiGroups:
+  - traefik.containo.us
+  resources:
+  - ingressroutes
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - traefik.containo.us
+  resources:
+  - ingressroutetcps
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - traefik.containo.us
+  resources:
+  - ingressrouteudps
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - yarotsky.me
   resources:
   - applications

@@ -16,11 +16,9 @@ import (
 func TestIngressMutator(t *testing.T) {
 	makeMutator := func(app *yarotskymev1alpha1.Application) *ingressMutator {
 		return &ingressMutator{
-			DefaultIngressClassName: "myingressclass",
-			DefaultIngressAnnotations: map[string]string{
-				"my.ingress/annotation": "my-annotation-value",
-			},
-			namer: &simpleNamer{app},
+			DefaultIngressClassName:   "myingressclass",
+			DefaultTraefikMiddlewares: []string{"https-redirect"},
+			namer:                     &simpleNamer{app},
 		}
 	}
 
@@ -45,7 +43,7 @@ func TestIngressMutator(t *testing.T) {
 		}
 	}
 
-	t.Run(`uses given default ingressClassName and annotations`, func(t *testing.T) {
+	t.Run(`uses given default ingressClassName and traefik middlewares`, func(t *testing.T) {
 		app := makeApp()
 
 		var ing networkingv1.Ingress
@@ -53,7 +51,22 @@ func TestIngressMutator(t *testing.T) {
 		assert.NoError(t, err)
 
 		assert.Equal(t, "myingressclass", *ing.Spec.IngressClassName)
-		assert.Equal(t, map[string]string{"my.ingress/annotation": "my-annotation-value"}, ing.Annotations)
+		assert.Equal(t, map[string]string{
+			"traefik.ingress.kubernetes.io/router.middlewares": "kube-system-https-redirect@kubernetescrd",
+		}, ing.Annotations)
+	})
+
+	t.Run(`allows overriding traefik middlewares`, func(t *testing.T) {
+		app := makeApp()
+		app.Spec.Ingress.TraefikMiddlewares = []string{"https-redirect", "forward-auth"}
+
+		var ing networkingv1.Ingress
+		err := makeMutator(&app).Mutate(context.TODO(), &app, &ing)()
+		assert.NoError(t, err)
+
+		assert.Equal(t, map[string]string{
+			"traefik.ingress.kubernetes.io/router.middlewares": "kube-system-https-redirect@kubernetescrd,kube-system-forward-auth@kubernetescrd",
+		}, ing.Annotations)
 	})
 
 	t.Run(`allows overriding ingressClassName`, func(t *testing.T) {
