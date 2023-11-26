@@ -141,11 +141,6 @@ func (in *ApplicationSpec) DeepCopyInto(out *ApplicationSpec) {
 		*out = new(Ingress)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.Ingress2 != nil {
-		in, out := &in.Ingress2, &out.Ingress2
-		*out = new(Ingress)
-		(*in).DeepCopyInto(*out)
-	}
 	if in.LoadBalancer != nil {
 		in, out := &in.LoadBalancer, &out.LoadBalancer
 		*out = new(LoadBalancer)

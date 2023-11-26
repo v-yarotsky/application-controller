@@ -103,9 +103,6 @@ type ApplicationSpec struct {
 	// +optional
 	Ingress *Ingress `json:"ingress,omitempty"`
 
-	// +optional
-	Ingress2 *Ingress `json:"ingress2,omitempty"`
-
 	// LoadBalancer creates a separate Service with type LoadBalancer,
 	// and exposes specified ports. It supports creating a DNS record
 	// via an external-dns annotation, the value of which is controlled

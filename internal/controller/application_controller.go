@@ -403,9 +403,6 @@ func (r *ApplicationReconciler) reconcileIngressRoute(ctx context.Context, app *
 		DefaultTraefikMiddlewares: r.DefaultTraefikMiddlewares,
 		namer:                     namer,
 	}
-	if app.Spec.Ingress2 != nil && app.Spec.Ingress == nil {
-		app.Spec.Ingress = app.Spec.Ingress2
-	}
 	wanted := app.Spec.Ingress != nil
 	return r.reconcileResource(ctx, app, namer.IngressRouteName(), &ing, mutator.Mutate(ctx, app, &ing), wanted, IngressRouteEvents)
 }
