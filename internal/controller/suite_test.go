@@ -27,6 +27,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -119,10 +120,16 @@ var _ = BeforeSuite(func() {
 		Scheme:                    k8sManager.GetScheme(),
 		ImageFinder:               watcher,
 		ImageUpdateEvents:         imageUpdateEvents,
-		DefaultTraefikMiddlewares: []string{"foo"},
-		Recorder:                  k8sManager.GetEventRecorderFor(Name),
-		SupportsPrometheus:        true,
-		SupportsTraefik:           true,
+		DefaultTraefikMiddlewares: []types.NamespacedName{{Namespace: "kube-system", Name: "foo"}},
+		AuthConfig: AuthConfig{
+			AuthPathPrefix:      "/oauth2/",
+			AuthServiceName:     types.NamespacedName{Namespace: "kube-system", Name: "oauth2-proxy"},
+			AuthServicePortName: "http",
+			AuthMiddlewareName:  types.NamespacedName{Namespace: "kube-system", Name: "oauth2"},
+		},
+		Recorder:           k8sManager.GetEventRecorderFor(Name),
+		SupportsPrometheus: true,
+		SupportsTraefik:    true,
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 

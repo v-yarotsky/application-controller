@@ -263,6 +263,13 @@ spec:
                 type: object
               ingress:
                 properties:
+                  auth:
+                    properties:
+                      enabled:
+                        type: boolean
+                    required:
+                    - enabled
+                    type: object
                   host:
                     description: "host is the fully qualified domain name of a network
                       host, as defined by RFC 3986. Note the following deviations

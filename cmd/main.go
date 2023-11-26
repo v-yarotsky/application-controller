@@ -63,7 +63,11 @@ func main() {
 	var enableLeaderElection bool
 	var probeAddr string
 	var imagePullSecrets flagext.StringSlice
-	var traefikMiddlewares flagext.StringSlice
+	var traefikMiddlewares flagext.NamespacedNameSlice
+	var traefikAuthPathPrefix string
+	var traefikAuthServiceName flagext.NamespacedName
+	var traefikAuthServicePortName string
+	var traefikAuthMiddlewareName flagext.NamespacedName
 	var defaultUpdateSchedule flagext.CronSchedule = "*/5 * * * * *"
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
@@ -72,8 +76,12 @@ func main() {
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
 	flag.Var(&imagePullSecrets, "image-pull-secret", "name of a Secret with image registry credentials. Can be used multiple times.")
-	flag.Var(&traefikMiddlewares, "traefik-default-middleware", "Traefik middleware namespace/name that is added to IngressRoutes by default, e.g. "+
-		"`kube-system/https-redirect` Can be used multiple times.")
+	flag.Var(&traefikMiddlewares, "traefik-default-middleware", "Name of Traefik middleware that is added to IngressRoutes by default, in "+
+		"the form of `namespace/name`. Can be used multiple times.")
+	flag.StringVar(&traefikAuthPathPrefix, "traefik-auth-path-prefix", "/oauth2/", "Path prefix for the authentication proxy endpoint")
+	flag.Var(&traefikAuthServiceName, "traefik-auth-service-name", "Kubernetes Service name of the authentication proxy, in the form of `namespace/name`")
+	flag.StringVar(&traefikAuthServicePortName, "traefik-auth-service-port-name", "http", "Kubernetes Service Port name of the authentication proxy")
+	flag.Var(&traefikAuthMiddlewareName, "traefik-auth-middleware-name", "Name of the forward-auth Traefik middleware, in the form of `namespace/name`")
 	flag.Var(&defaultUpdateSchedule, "default-update-schedule", "Default Cron schedule for image update checks (default: `@every 5m`);"+
 		" See https://pkg.go.dev/github.com/robfig/cron#hdr-CRON_Expression_Format")
 
@@ -146,9 +154,15 @@ func main() {
 		ImageFinder:               imageWatcher,
 		ImageUpdateEvents:         imageUpdateEvents,
 		DefaultTraefikMiddlewares: traefikMiddlewares,
-		SupportsTraefik:           hasTraefik,
-		SupportsPrometheus:        hasPrometheus,
-		Recorder:                  mgr.GetEventRecorderFor(controller.Name),
+		AuthConfig: controller.AuthConfig{
+			AuthPathPrefix:      traefikAuthPathPrefix,
+			AuthServiceName:     traefikAuthServiceName.Value,
+			AuthServicePortName: traefikAuthServicePortName,
+			AuthMiddlewareName:  traefikAuthMiddlewareName.Value,
+		},
+		SupportsTraefik:    hasTraefik,
+		SupportsPrometheus: hasPrometheus,
+		Recorder:           mgr.GetEventRecorderFor(controller.Name),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Application")
 		os.Exit(1)

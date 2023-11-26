@@ -279,6 +279,8 @@ type Ingress struct {
 	// +optional
 	Host string `json:"host,omitempty"`
 
+	Auth *IngressAuth `json:"auth,omitempty"`
+
 	// Guesses `web` or `http` by default.
 	PortName string `json:"portName,omitempty"`
 
@@ -287,6 +289,10 @@ type Ingress struct {
 	// - be configured via Traefik CRDs, and
 	// - be in `kube-system` namespace.
 	TraefikMiddlewares []string `json:"traefikMiddlewares,omitempty"`
+}
+
+type IngressAuth struct {
+	Enabled bool `json:"enabled"`
 }
 
 type LoadBalancer struct {

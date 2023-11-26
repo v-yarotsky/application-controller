@@ -137,7 +137,8 @@ var (
 type ApplicationReconciler struct {
 	ImageFinder               images.ImageFinder
 	ImageUpdateEvents         chan event.GenericEvent
-	DefaultTraefikMiddlewares []string
+	DefaultTraefikMiddlewares []types.NamespacedName
+	AuthConfig                AuthConfig
 	client.Client
 	Scheme             *runtime.Scheme
 	Recorder           record.EventRecorder
@@ -401,6 +402,7 @@ func (r *ApplicationReconciler) reconcileIngressRoute(ctx context.Context, app *
 	var ing traefikv1alpha1.IngressRoute
 	mutator := &ingressRouteMutator{
 		DefaultTraefikMiddlewares: r.DefaultTraefikMiddlewares,
+		AuthConfig:                r.AuthConfig,
 		namer:                     namer,
 	}
 	wanted := app.Spec.Ingress != nil
