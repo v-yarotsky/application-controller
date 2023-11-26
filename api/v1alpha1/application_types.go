@@ -254,9 +254,6 @@ type Volume struct {
 }
 
 type Ingress struct {
-	// ingressClassName is the name of an IngressClass cluster resource.
-	IngressClassName *string `json:"ingressClassName,omitempty"`
-
 	// host is the fully qualified domain name of a network host, as defined by RFC 3986.
 	// Note the following deviations from the "host" part of the
 	// URI as defined in RFC 3986:

@@ -287,10 +287,6 @@ spec:
                       request matches this rule if the http host header is to equal
                       to the suffix (removing the first label) of the wildcard rule."
                     type: string
-                  ingressClassName:
-                    description: ingressClassName is the name of an IngressClass cluster
-                      resource.
-                    type: string
                   portName:
                     description: Guesses `web` or `http` by default.
                     type: string
