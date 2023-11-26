@@ -120,7 +120,7 @@ rules:
   verbs:
   - bind
 - apiGroups:
-  - traefik.containo.us
+  - traefik.io
   resources:
   - ingressroutes
   verbs:
@@ -132,7 +132,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - traefik.containo.us
+  - traefik.io
   resources:
   - ingressroutetcps
   verbs:
@@ -144,7 +144,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - traefik.containo.us
+  - traefik.io
   resources:
   - ingressrouteudps
   verbs:

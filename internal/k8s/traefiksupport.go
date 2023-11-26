@@ -33,7 +33,7 @@ func IsTraefikInstalled(cfg *rest.Config) (bool, error) {
 	}
 
 	for _, g := range apiResourceList {
-		if g.GroupVersion != "traefik.containo.us/v1alpha1" {
+		if g.GroupVersion != "traefik.io/v1alpha1" {
 			continue
 		}
 

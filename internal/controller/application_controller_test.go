@@ -24,7 +24,7 @@ import (
 	"git.home.yarotsky.me/vlad/application-controller/internal/k8s"
 	"git.home.yarotsky.me/vlad/application-controller/internal/testutil"
 	prometheusv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
-	traefikv1alpha1 "github.com/traefik/traefik/v2/pkg/provider/kubernetes/crd/traefikcontainous/v1alpha1"
+	traefikv1alpha1 "github.com/traefik/traefik/v2/pkg/provider/kubernetes/crd/traefikio/v1alpha1"
 )
 
 var _ = Describe("Application controller", func() {
