@@ -38,6 +38,7 @@ spec:
         - "--metrics-bind-address=127.0.0.1:8080"
         - "--leader-elect"
         - "--image-pull-secret=regcred"
+        - "--traefik-cname-target=traefik.home.yarotsky.me"
         - "--traefik-default-middleware=kube-system/https-redirect"
         - "--traefik-auth-path-prefix=/oauth2/"
         - "--traefik-auth-service-name=kube-system/oauth2-proxy"

@@ -121,6 +121,7 @@ var _ = BeforeSuite(func() {
 		ImageFinder:               watcher,
 		ImageUpdateEvents:         imageUpdateEvents,
 		DefaultTraefikMiddlewares: []types.NamespacedName{{Namespace: "kube-system", Name: "foo"}},
+		TraefikCNAMETarget:        "traefik.example.com",
 		AuthConfig: AuthConfig{
 			AuthPathPrefix:      "/oauth2/",
 			AuthServiceName:     types.NamespacedName{Namespace: "kube-system", Name: "oauth2-proxy"},

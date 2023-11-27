@@ -16,6 +16,7 @@ import (
 func TestIngressRouteMutator(t *testing.T) {
 	makeMutator := func(app *yarotskymev1alpha1.Application) *ingressRouteMutator {
 		return &ingressRouteMutator{
+			CNAMETarget:               "traefik.example.com",
 			DefaultTraefikMiddlewares: []types.NamespacedName{{Namespace: "kube-system", Name: "https-redirect"}},
 			AuthConfig: AuthConfig{
 				AuthPathPrefix: "/oauth2/",
@@ -161,5 +162,15 @@ func TestIngressRouteMutator(t *testing.T) {
 		mut.AuthPathPrefix = ""
 		err := mut.Mutate(context.TODO(), &app, &ing)()
 		assert.ErrorIs(t, err, ErrInvalidAuthConfig)
+	})
+
+	t.Run(`annotates the IngressRoute for external-dns`, func(t *testing.T) {
+		app := makeApp()
+
+		var ing traefikv1alpha1.IngressRoute
+		err := makeMutator(&app).Mutate(context.TODO(), &app, &ing)()
+		assert.NoError(t, err)
+
+		assert.Equal(t, "traefik.example.com", ing.Annotations["external-dns.alpha.kubernetes.io/target"])
 	})
 }

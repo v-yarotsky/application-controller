@@ -53,6 +53,7 @@ import (
 const (
 	Name                          = "application-controller"
 	ExternalDNSHostnameAnnotation = "external-dns.alpha.kubernetes.io/hostname"
+	ExternalDNSTargetAnnotation   = "external-dns.alpha.kubernetes.io/target"
 
 	EventImageCheckFailed = "ImageCheckFailed"
 	EventImageUpdated     = "ImageUpdated"
@@ -138,6 +139,7 @@ type ApplicationReconciler struct {
 	ImageFinder               images.ImageFinder
 	ImageUpdateEvents         chan event.GenericEvent
 	DefaultTraefikMiddlewares []types.NamespacedName
+	TraefikCNAMETarget        string
 	AuthConfig                AuthConfig
 	client.Client
 	Scheme             *runtime.Scheme
@@ -402,6 +404,7 @@ func (r *ApplicationReconciler) reconcileIngressRoute(ctx context.Context, app *
 	var ing traefikv1alpha1.IngressRoute
 	mutator := &ingressRouteMutator{
 		DefaultTraefikMiddlewares: r.DefaultTraefikMiddlewares,
+		CNAMETarget:               r.TraefikCNAMETarget,
 		AuthConfig:                r.AuthConfig,
 		namer:                     namer,
 	}

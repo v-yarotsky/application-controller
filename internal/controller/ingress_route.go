@@ -26,6 +26,7 @@ var (
 type ingressRouteMutator struct {
 	namer                     Namer
 	DefaultTraefikMiddlewares []types.NamespacedName
+	CNAMETarget               string
 	AuthConfig
 }
 
@@ -76,6 +77,11 @@ func (f *ingressRouteMutator) Mutate(ctx context.Context, app *yarotskymev1alpha
 		if portName == "" {
 			return ErrNoIngressRoutePort
 		}
+
+		if ing.ObjectMeta.Annotations == nil {
+			ing.ObjectMeta.Annotations = map[string]string{}
+		}
+		ing.ObjectMeta.Annotations[ExternalDNSTargetAnnotation] = f.CNAMETarget
 
 		svcName := f.namer.ServiceName()
 

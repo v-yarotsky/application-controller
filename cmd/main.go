@@ -68,6 +68,7 @@ func main() {
 	var traefikAuthServiceName flagext.NamespacedName
 	var traefikAuthServicePortName string
 	var traefikAuthMiddlewareName flagext.NamespacedName
+	var traefikCNAMETarget string
 	var defaultUpdateSchedule flagext.CronSchedule = "*/5 * * * * *"
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
@@ -82,6 +83,7 @@ func main() {
 	flag.Var(&traefikAuthServiceName, "traefik-auth-service-name", "Kubernetes Service name of the authentication proxy, in the form of `namespace/name`")
 	flag.StringVar(&traefikAuthServicePortName, "traefik-auth-service-port-name", "http", "Kubernetes Service Port name of the authentication proxy")
 	flag.Var(&traefikAuthMiddlewareName, "traefik-auth-middleware-name", "Name of the forward-auth Traefik middleware, in the form of `namespace/name`")
+	flag.StringVar(&traefikCNAMETarget, "traefik-cname-target", "", "Ingress CNAME target (must point at Traefik load balancer)")
 	flag.Var(&defaultUpdateSchedule, "default-update-schedule", "Default Cron schedule for image update checks (default: `@every 5m`);"+
 		" See https://pkg.go.dev/github.com/robfig/cron#hdr-CRON_Expression_Format")
 
@@ -154,6 +156,7 @@ func main() {
 		ImageFinder:               imageWatcher,
 		ImageUpdateEvents:         imageUpdateEvents,
 		DefaultTraefikMiddlewares: traefikMiddlewares,
+		TraefikCNAMETarget:        traefikCNAMETarget,
 		AuthConfig: controller.AuthConfig{
 			AuthPathPrefix:      traefikAuthPathPrefix,
 			AuthServiceName:     traefikAuthServiceName.Value,
