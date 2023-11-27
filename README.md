@@ -9,7 +9,7 @@ Application controller automatically manages the following Kubernetes resources 
 - Deployment
 - ServiceAccount
 - Service
-- Ingress
+- IngressRoute
 - PodMonitor
 - RoleBinding
 - ClusterRoleBinding
@@ -76,8 +76,9 @@ spec:
   ingress:
     # Ingress annotations can be set via `--ingress-annotations`.
     host: "dashboard.home.yarotsky.me"
-    ingressClassName: "nginx-private"  # default can be set via `--ingress-class`
     portName: "http"                   # defaults to `"web" `or `"http" `if present in `.spec.ports`
+    auth:
+      enabled: true  # Enables authentication proxy for this IngressRoute.
   loadBalancer:
     host: "udp.home.yarotsky.me"
     portNames: ["listen-udp"]
@@ -114,6 +115,108 @@ spec:
   - apiGroup: "rbac.authorization.k8s.io"
     kind: "Role"
     name: "my-role"
+```
+
+## Prerequisites
+
+```yaml
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    providers:
+      kubernetesCRD:
+        allowCrossNamespace: true
+      service:
+        annotations:
+          "external-dns.alpha.kubernetes.io/hostname": "my.traefik.ingress.example.com"
+```
+
+## Auth proxy
+
+### Additional prerequisites
+
+```yaml
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: oauth2-signin
+  namespace: kube-system
+spec:
+  errors:
+    query: /oauth2/sign_in
+    service:
+      name: oauth2-proxy
+      namespace: kube-system
+      port: http
+    status:
+    - "401"
+```
+
+```yaml
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: oauth2-forward
+  namespace: kube-system
+spec:
+  forwardAuth:
+    address: https://auth.home.yarotsky.me/oauth2/auth
+    trustForwardHeader: true
+```
+
+```yaml
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: forward-auth
+  namespace: kube-system
+spec:
+  chain:
+    middlewares:
+    - name: oauth2-signin
+      namespace: kube-system
+    - name: oauth2-forward
+      namespace: kube-system
+```
+
+Next, install [OAuth2 Proxy](https://github.com/oauth2-proxy/oauth2-proxy), with the following configuration:
+
+```yaml
+OAUTH2_PROXY_HTTP_ADDRESS: "0.0.0.0:4180",
+OAUTH2_PROXY_COOKIE_DOMAINS: ".example.com",
+OAUTH2_PROXY_WHITELIST_DOMAINS: ".example.com",
+OAUTH2_PROXY_PROVIDER: "oidc",
+OAUTH2_PROXY_CLIENT_ID: "oauth2-proxy",
+OAUTH2_PROXY_CLIENT_SECRET: "<OIDC provider client secret>"
+OAUTH2_PROXY_EMAIL_DOMAINS: "*",
+OAUTH2_PROXY_OIDC_ISSUER_URL: oidcClient.discoveryURL,
+OAUTH2_PROXY_REDIRECT_URL: redirectUrl,
+OAUTH2_PROXY_COOKIE_CSRF_PER_REQUEST: "true",
+OAUTH2_PROXY_COOKIE_CSRF_EXPIRE: '5m',
+OAUTH2_PROXY_REVERSE_PROXY: "true",
+OAUTH2_PROXY_SET_XAUTHREQUEST: "true",
+// Needed to disable the mandatory validated email requirement, if you know what you're doing
+// Ref: https://joeeey.com/blog/selfhosting-sso-with-traefik-oauth2-proxy-part-2#https://joeeey.com/blog/selfhosting-sso-with-traefik-oauth2-proxy-part-2/
+OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL: "true",
+OAUTH2_PROXY_OIDC_EMAIL_CLAIM: "sub",
+// Needed for multiple subdomains support
+// Ref: https://github.com/oauth2-proxy/oauth2-proxy/issues/1297#issuecomment-1564124675
+OAUTH2_PROXY_FOOTER: "<script>(function(){var rd=document.getElementsByName('rd');for(var i=0;i<rd.length;i++)rd[i].value=window.location.toString().split('/oauth2')[0]})()</script>"
+OAUTH2_PROXY_COOKIE_SECRET: "<32-byte cookie secret>"
+```
+
+The following flags should be supplied to the application controller:
+
+```
+--traefik-cname-target=my.traefik.ingress.example.com \
+--traefik-auth-path-prefix=/oauth2/ \
+--traefik-auth-service-name=kube-system/oauth2-proxy \
+--traefik-auth-service-port-name=http \
+--traefik-auth-middleware-name=kube-system/forward-auth \
 ```
 
 ## Container Image Registry Authentication
