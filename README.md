@@ -164,8 +164,13 @@ metadata:
   namespace: kube-system
 spec:
   forwardAuth:
-    address: https://auth.home.yarotsky.me/oauth2/auth
+    address: https://auth.home.example.com/oauth2/auth
     trustForwardHeader: true
+    authResponseHeaders:
+    - "X-Auth-Request-Email"
+    - "X-Auth-Request-Groups"
+    - "X-Auth-Request-Preferred-Username"
+    - "X-Auth-Request-User"
 ```
 
 ```yaml
