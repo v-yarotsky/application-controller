@@ -1,38 +1,29 @@
-package controller
+package controller_test
 
 import (
-	"context"
 	"fmt"
-	"time"
+	"slices"
+	"testing"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
 	"git.home.yarotsky.me/vlad/application-controller/internal/images"
 	"git.home.yarotsky.me/vlad/application-controller/internal/k8s"
-	"git.home.yarotsky.me/vlad/application-controller/internal/testutil"
 	prometheusv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	traefikv1alpha1 "github.com/traefik/traefik/v2/pkg/provider/kubernetes/crd/traefikio/v1alpha1"
 )
 
-var _ = Describe("Application controller", func() {
-	const (
-		namespace = "default"
-	)
-
-	var (
-		registry *testutil.TestRegistry
-	)
+func TestApplicationController(t *testing.T) {
+	initializeTestEnvironment(t)
+	defer tearDownTestEnvironment(t)
 
 	makeApp := func(name string, imageRef *images.ImageRef) yarotskymev1alpha1.Application {
 		return yarotskymev1alpha1.Application{
@@ -116,137 +107,126 @@ var _ = Describe("Application controller", func() {
 		}
 	}
 
-	BeforeEach(func() {
-		registry = testutil.NewTestRegistry(GinkgoT())
-	})
-
-	AfterEach(func() {
-		registry.Close()
-	})
-
-	It("Should create Application custom resources", func(ctx SpecContext) {
-		By("Creating an Application CR")
+	t.Run("Should create Application custom resources", func(t *testing.T) {
 		imageRef := registry.MustUpsertTag("app1", "latest")
 		app := makeApp("app1", imageRef)
-		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+		require.NoError(t, k8sClient.Create(ctx, &app))
 
-		By("Creating a service account")
+		// Create a service account
 		serviceAccountName := mkName(app.Namespace, app.Name)
 		var serviceAccount corev1.ServiceAccount
-		EventuallyGetObject(ctx, serviceAccountName, &serviceAccount)
+		EventuallyGetObject(t, serviceAccountName, &serviceAccount)
 
-		By("Creating cluster role bindings for ClusterRoles")
+		// Create cluster role bindings for ClusterRoles
 		var crb rbacv1.ClusterRoleBinding
-		EventuallyGetObject(ctx, mkName("", "default-app1-clusterrole-my-cluster-role"), &crb, func(g Gomega) {
-			g.Expect(crb.Subjects).To(ContainElement(rbacv1.Subject{
+		EventuallyGetObject(t, mkName("", "default-app1-clusterrole-my-cluster-role"), &crb, func(t require.TestingT) {
+			assert.Contains(t, crb.Subjects, rbacv1.Subject{
 				APIGroup:  "",
 				Kind:      "ServiceAccount",
 				Name:      serviceAccountName.Name,
 				Namespace: serviceAccountName.Namespace,
-			}))
+			})
 
-			g.Expect(crb.RoleRef).To(Equal(rbacv1.RoleRef{
+			assert.Equal(t, rbacv1.RoleRef{
 				APIGroup: "rbac.authorization.k8s.io",
 				Kind:     "ClusterRole",
 				Name:     "my-cluster-role",
-			}))
+			}, crb.RoleRef)
 		})
 
-		By("Creating role bindings for ClusterRoles")
+		// Create role bindings for ClusterRoles
 		var rb rbacv1.RoleBinding
-		EventuallyGetObject(ctx, mkName(app.Namespace, "app1-clusterrole-my-cluster-role-for-namespace"), &rb, func(g Gomega) {
-			g.Expect(rb.Subjects).To(ContainElement(rbacv1.Subject{
+		EventuallyGetObject(t, mkName(app.Namespace, "app1-clusterrole-my-cluster-role-for-namespace"), &rb, func(t require.TestingT) {
+			assert.Contains(t, rb.Subjects, rbacv1.Subject{
 				APIGroup:  "",
 				Kind:      "ServiceAccount",
 				Name:      serviceAccountName.Name,
 				Namespace: serviceAccountName.Namespace,
-			}))
+			})
 
-			g.Expect(rb.RoleRef).To(Equal(rbacv1.RoleRef{
+			assert.Equal(t, rbacv1.RoleRef{
 				APIGroup: "rbac.authorization.k8s.io",
 				Kind:     "ClusterRole",
 				Name:     "my-cluster-role-for-namespace",
-			}))
+			}, rb.RoleRef)
 		})
 
-		By("Creating role bindings for Roles")
+		// Create role bindings for Roles
 		var rb2 rbacv1.RoleBinding
-		EventuallyGetObject(ctx, mkName(app.Namespace, "app1-role-my-role"), &rb2, func(g Gomega) {
-			g.Expect(rb2.Subjects).To(ContainElement(rbacv1.Subject{
+		EventuallyGetObject(t, mkName(app.Namespace, "app1-role-my-role"), &rb2, func(t require.TestingT) {
+			assert.Contains(t, rb2.Subjects, rbacv1.Subject{
 				APIGroup:  "",
 				Kind:      "ServiceAccount",
 				Name:      serviceAccountName.Name,
 				Namespace: serviceAccountName.Namespace,
-			}))
+			})
 
-			g.Expect(rb2.RoleRef).To(Equal(rbacv1.RoleRef{
+			assert.Equal(t, rbacv1.RoleRef{
 				APIGroup: "rbac.authorization.k8s.io",
 				Kind:     "Role",
 				Name:     "my-role",
-			}))
+			}, rb2.RoleRef)
 		})
 
-		By("Creating a deployment")
+		// Create a deployment
 		var deploy appsv1.Deployment
-		EventuallyGetObject(ctx, mkName(app.Namespace, app.Name), &deploy, func(g Gomega) {
-			g.Expect(deploy.Spec.Template.Spec.ServiceAccountName).To(Equal(serviceAccountName.Name))
-			g.Expect(deploy.Spec.Template.Spec.Volumes).To(ContainElement(
-				SatisfyAll(
-					HaveField("Name", "data"),
-					HaveField("VolumeSource.PersistentVolumeClaim.ClaimName", "data"),
-				),
-			))
+		EventuallyGetObject(t, mkName(app.Namespace, app.Name), &deploy, func(t require.TestingT) {
+			assert.Equal(t, serviceAccountName.Name, deploy.Spec.Template.Spec.ServiceAccountName)
 
-			g.Expect(deploy.Spec.Template.Spec.Containers).To(HaveLen(1))
+			assert.True(t, slices.ContainsFunc(deploy.Spec.Template.Spec.Volumes, func(vol corev1.Volume) bool {
+				return vol.Name == "data" && vol.VolumeSource.PersistentVolumeClaim.ClaimName == "data"
+			}))
 
-			mainContainer := deploy.Spec.Template.Spec.Containers[0]
-			g.Expect(mainContainer.Image).To(Equal(imageRef.String()))
-			g.Expect(mainContainer.Ports).To(HaveLen(3))
-			g.Expect(mainContainer.Ports).To(ContainElements(
-				SatisfyAll(
-					HaveField("Name", "http"),
-					HaveField("ContainerPort", int32(8080)),
-					HaveField("Protocol", corev1.ProtocolTCP),
-				),
-				SatisfyAll(
-					HaveField("Name", "metrics"),
-					HaveField("ContainerPort", int32(8192)),
-					HaveField("Protocol", corev1.ProtocolTCP),
-				),
-				SatisfyAll(
-					HaveField("Name", "listen-udp"),
-					HaveField("ContainerPort", int32(22000)),
-					HaveField("Protocol", corev1.ProtocolUDP),
-				),
-			))
-			g.Expect(mainContainer.VolumeMounts).To(ContainElement(corev1.VolumeMount{
+			assert.Len(t, deploy.Spec.Template.Spec.Containers, 1)
+			if len(deploy.Spec.Template.Spec.Containers) != 1 {
+				return
+			}
+			c := deploy.Spec.Template.Spec.Containers[0]
+			assert.Equal(t, imageRef.String(), c.Image)
+			assert.Len(t, c.Ports, 3)
+			assert.True(t, slices.ContainsFunc(c.Ports, func(p corev1.ContainerPort) bool {
+				return p.Name == "http" &&
+					p.ContainerPort == int32(8080) &&
+					p.Protocol == corev1.ProtocolTCP
+			}))
+			assert.True(t, slices.ContainsFunc(c.Ports, func(p corev1.ContainerPort) bool {
+				return p.Name == "metrics" &&
+					p.ContainerPort == int32(8192) &&
+					p.Protocol == corev1.ProtocolTCP
+			}))
+			assert.True(t, slices.ContainsFunc(c.Ports, func(p corev1.ContainerPort) bool {
+				return p.Name == "listen-udp" &&
+					p.ContainerPort == int32(22000) &&
+					p.Protocol == corev1.ProtocolUDP
+			}))
+			assert.Contains(t, c.VolumeMounts, corev1.VolumeMount{
 				Name:      "data",
 				MountPath: "/data",
-			}))
+			})
 		})
 
-		By("Creating a service")
+		// Create a service
 		serviceName := mkName(app.Namespace, app.Name)
 		var service corev1.Service
-		EventuallyGetObject(ctx, serviceName, &service, func(g Gomega) {
-			g.Expect(service.Spec.Ports).To(ContainElement(corev1.ServicePort{
+		EventuallyGetObject(t, serviceName, &service, func(t require.TestingT) {
+			assert.Contains(t, service.Spec.Ports, corev1.ServicePort{
 				Name:       "http",
 				TargetPort: intstr.FromString("http"),
 				Protocol:   corev1.ProtocolTCP,
 				Port:       8080,
-			}))
+			})
 
-			g.Expect(service.Spec.Selector).To(Equal(map[string]string{
+			assert.Equal(t, map[string]string{
 				"app.kubernetes.io/name":       app.Name,
 				"app.kubernetes.io/managed-by": "application-controller",
 				"app.kubernetes.io/instance":   "default",
-			}))
+			}, service.Spec.Selector)
 		})
 
-		By("Creating an IngressRoute")
+		// Create an IngressRoute
 		var ingressRoute traefikv1alpha1.IngressRoute
-		EventuallyGetObject(ctx, mkName(app.Namespace, app.Name), &ingressRoute, func(g Gomega) {
-			g.Expect(ingressRoute.Spec.Routes).To(ContainElement(traefikv1alpha1.Route{
+		EventuallyGetObject(t, mkName(app.Namespace, app.Name), &ingressRoute, func(t require.TestingT) {
+			assert.Contains(t, ingressRoute.Spec.Routes, traefikv1alpha1.Route{
 				Kind:  "Rule",
 				Match: "Host(`dashboard.home.yarotsky.me`)",
 				Services: []traefikv1alpha1.Service{
@@ -265,119 +245,112 @@ var _ = Describe("Application controller", func() {
 						Name:      "foo",
 					},
 				},
-			}))
+			})
 		})
 
-		By("Creating a LoadBalancer service")
+		// Create a LoadBalancer service
 		lbServiceName := mkName(app.Namespace, fmt.Sprintf("%s-loadbalancer", app.Name))
 		var lbService corev1.Service
-		EventuallyGetObject(ctx, lbServiceName, &lbService, func(g Gomega) {
-			g.Expect(lbService.Annotations).To(HaveKeyWithValue(
-				"external-dns.alpha.kubernetes.io/hostname",
-				"endpoint.home.yarotsky.me",
-			))
+		EventuallyGetObject(t, lbServiceName, &lbService, func(t require.TestingT) {
+			assert.Contains(t, lbService.Annotations, "external-dns.alpha.kubernetes.io/hostname")
+			assert.Equal(t, "endpoint.home.yarotsky.me", lbService.Annotations["external-dns.alpha.kubernetes.io/hostname"])
 
-			g.Expect(lbService.Spec.Ports).To(ContainElement(
-				SatisfyAll(
-					HaveField("Name", "listen-udp"),
-					HaveField("TargetPort", intstr.FromString("listen-udp")),
-					HaveField("Protocol", corev1.ProtocolUDP),
-					HaveField("Port", int32(22000)),
-				),
-			))
+			assert.True(t, slices.ContainsFunc(lbService.Spec.Ports, func(p corev1.ServicePort) bool {
+				return p.Name == "listen-udp" &&
+					p.TargetPort == intstr.FromString("listen-udp") &&
+					p.Protocol == corev1.ProtocolUDP &&
+					p.Port == int32(22000)
+			}))
 
-			g.Expect(lbService.Spec.Selector).To(Equal(map[string]string{
+			assert.Equal(t, map[string]string{
 				"app.kubernetes.io/name":       app.Name,
 				"app.kubernetes.io/managed-by": "application-controller",
 				"app.kubernetes.io/instance":   "default",
-			}))
+			}, lbService.Spec.Selector)
 		})
 
-		By("Creating the PodMonitor")
+		// Create the PodMonitor
 		var pm prometheusv1.PodMonitor
 		pmName := mkName(app.Namespace, app.Name)
-		EventuallyGetObject(ctx, pmName, &pm, func(g Gomega) {
-			g.Expect(pm.Spec.PodMetricsEndpoints).To(ConsistOf(
-				prometheusv1.PodMetricsEndpoint{
-					Port: "metrics",
-					Path: "/metrics",
+		EventuallyGetObject(t, pmName, &pm, func(t require.TestingT) {
+			assert.ElementsMatch(t, pm.Spec.PodMetricsEndpoints, []prometheusv1.PodMetricsEndpoint{{
+				Port: "metrics",
+				Path: "/metrics",
+			}})
+
+			assert.Equal(t, metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app.kubernetes.io/name":       app.Name,
+					"app.kubernetes.io/managed-by": "application-controller",
+					"app.kubernetes.io/instance":   "default",
 				},
-			))
-
-			g.Expect(pm.Spec.Selector).To(Equal(
-				metav1.LabelSelector{
-					MatchLabels: map[string]string{
-						"app.kubernetes.io/name":       app.Name,
-						"app.kubernetes.io/managed-by": "application-controller",
-						"app.kubernetes.io/instance":   "default",
-					},
-				}))
+			}, pm.Spec.Selector)
 		})
-	}, SpecTimeout(5*time.Second))
+	})
 
-	It("Should update managed deployments when a new image is available", func(ctx SpecContext) {
+	t.Run("Should update managed deployments when a new image is available", func(t *testing.T) {
 		imageRef := registry.MustUpsertTag("app2", "latest")
 		app := makeApp("app2", imageRef)
 		appName := mkName(app.Namespace, app.Name)
-		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+		require.NoError(t, k8sClient.Create(ctx, &app))
 
 		deployName := mkName(app.Namespace, app.Name)
 		var deploy appsv1.Deployment
 
-		By("Creating a deployment with the current image")
-		EventuallyGetObject(ctx, deployName, &deploy, func(g Gomega) {
-			g.Expect(deploy.Spec.Template.Spec.Containers).To(HaveLen(1))
-
-			mainContainer := deploy.Spec.Template.Spec.Containers[0]
-			g.Expect(mainContainer.Image).To(Equal(imageRef.String()))
+		// Create a deployment with the current image
+		EventuallyGetObject(t, deployName, &deploy, func(t require.TestingT) {
+			assert.Len(t, deploy.Spec.Template.Spec.Containers, 1)
+			assert.True(t, slices.ContainsFunc(deploy.Spec.Template.Spec.Containers, func(c corev1.Container) bool {
+				return c.Image == imageRef.String()
+			}))
 		})
 
-		By("Eventually updating the image")
+		// Eventually update the image
 		newImageDigestRef := registry.MustUpsertTag("app2", "latest")
 		imageUpdateEvents <- event.GenericEvent{Object: &app}
 
-		EventuallyGetObject(ctx, deployName, &deploy, func(g Gomega) {
-			g.Expect(deploy.Spec.Template.Spec.Containers).To(HaveLen(1))
-
-			mainContainer := deploy.Spec.Template.Spec.Containers[0]
-			g.Expect(mainContainer.Image).To(Equal(newImageDigestRef.String()))
+		EventuallyGetObject(t, deployName, &deploy, func(t require.TestingT) {
+			assert.Len(t, deploy.Spec.Template.Spec.Containers, 1)
+			assert.True(t, slices.ContainsFunc(deploy.Spec.Template.Spec.Containers, func(c corev1.Container) bool {
+				return c.Image == newImageDigestRef.String()
+			}))
 		})
 
-		EventuallyGetObject(ctx, appName, &app, func(g Gomega) {
-			g.Expect(app.Status.Image).To(Equal(newImageDigestRef.String()))
+		EventuallyGetObject(t, appName, &app, func(t require.TestingT) {
+			assert.Equal(t, newImageDigestRef.String(), app.Status.Image)
 		})
-	}, SpecTimeout(5*time.Second))
+	})
 
-	It("Should properly delete created ClusterRoleBinding objects", func(ctx SpecContext) {
+	t.Run("Should properly delete created ClusterRoleBinding objects", func(t *testing.T) {
 		imageRef := registry.MustUpsertTag("app4", "latest")
 		app := makeApp("app4", imageRef)
 
 		crbName := mkName("", "default-app4-clusterrole-my-cluster-role")
 		var crb rbacv1.ClusterRoleBinding
 
-		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+		require.NoError(t, k8sClient.Create(ctx, &app))
 
-		EventuallyGetObject(ctx, crbName, &crb)
+		EventuallyGetObject(t, crbName, &crb)
 
-		By("Deleting the CluseterRoleBinding objects")
-		Expect(k8sClient.Delete(ctx, &app)).Should(Succeed())
+		// Delete the CluseterRoleBinding objects
+		require.NoError(t, k8sClient.Delete(ctx, &app))
 
-		EventuallyNotFindObject(ctx, crbName, &crb)
-	}, SpecTimeout(5*time.Second))
+		EventuallyNotFindObject(t, crbName, &crb)
+	})
 
-	It("Should update the deployment when container configuration changes", func(ctx SpecContext) {
+	t.Run("Should update the deployment when container configuration changes", func(t *testing.T) {
 		imageRef := registry.MustUpsertTag("app5", "latest")
 		app := makeApp("app5", imageRef)
-		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+		require.NoError(t, k8sClient.Create(ctx, &app))
 
 		deployName := mkName(app.Namespace, app.Name)
 		var deploy appsv1.Deployment
 
-		By("Creating a deployment")
-		EventuallyGetObject(ctx, deployName, &deploy)
+		// Create a deployment
+		EventuallyGetObject(t, deployName, &deploy)
 
-		By("Updating the Application")
-		EventuallyUpdateApp(ctx, &app, func() {
+		// Update the Application
+		EventuallyUpdateApp(t, &app, func() {
 			app.Spec.Env = []corev1.EnvVar{
 				{
 					Name:  "MY_ENV_VAR",
@@ -386,19 +359,19 @@ var _ = Describe("Application controller", func() {
 			}
 		})
 
-		By("Eventually updating the deployment")
-		EventuallyGetObject(ctx, deployName, &deploy, func(g Gomega) {
-			g.Expect(deploy.Spec.Template.Spec.Containers).To(HaveLen(1))
-
-			mainContainer := deploy.Spec.Template.Spec.Containers[0]
-			g.Expect(mainContainer.Env).To(ContainElement(corev1.EnvVar{Name: "MY_ENV_VAR", Value: "FOO"}))
+		// Eventually update the deployment
+		EventuallyGetObject(t, deployName, &deploy, func(t require.TestingT) {
+			assert.Len(t, deploy.Spec.Template.Spec.Containers, 1)
+			assert.True(t, slices.ContainsFunc(deploy.Spec.Template.Spec.Containers, func(c corev1.Container) bool {
+				return slices.Contains(c.Env, corev1.EnvVar{Name: "MY_ENV_VAR", Value: "FOO"})
+			}))
 		})
-	}, SpecTimeout(5*time.Second))
+	})
 
-	It("Should remove rolebindings for removed roles", func(ctx SpecContext) {
+	t.Run("Should remove rolebindings for removed roles", func(t *testing.T) {
 		imageRef := registry.MustUpsertTag("app6", "latest")
 		app := makeApp("app6", imageRef)
-		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+		require.NoError(t, k8sClient.Create(ctx, &app))
 
 		var rb, rbClusterRole rbacv1.RoleBinding
 		var crb rbacv1.ClusterRoleBinding
@@ -407,27 +380,27 @@ var _ = Describe("Application controller", func() {
 		crbName := mkName("", "default-app6-clusterrole-my-cluster-role")
 		appName := mkName(app.Namespace, app.Name)
 
-		By("Creating the role bindings")
-		EventuallyGetObject(ctx, rbName, &rb)
-		EventuallyGetObject(ctx, rbClusterRoleName, &rbClusterRole)
-		EventuallyGetObject(ctx, crbName, &crb)
-		EventuallyGetObject(ctx, appName, &app)
+		// Create the role bindings
+		EventuallyGetObject(t, rbName, &rb)
+		EventuallyGetObject(t, rbClusterRoleName, &rbClusterRole)
+		EventuallyGetObject(t, crbName, &crb)
+		EventuallyGetObject(t, appName, &app)
 
-		By("Updating the Application")
-		EventuallyUpdateApp(ctx, &app, func() {
+		// Update the Application
+		EventuallyUpdateApp(t, &app, func() {
 			app.Spec.Roles = []yarotskymev1alpha1.ScopedRoleRef{}
 		})
 
-		By("Eventually removing the role bindings")
-		EventuallyNotFindObject(ctx, rbName, &rb)
-		EventuallyNotFindObject(ctx, rbClusterRoleName, &rbClusterRole)
-		EventuallyNotFindObject(ctx, crbName, &crb)
-	}, SpecTimeout(5*time.Second))
+		// Eventually remove the role bindings
+		EventuallyNotFindObject(t, rbName, &rb)
+		EventuallyNotFindObject(t, rbClusterRoleName, &rbClusterRole)
+		EventuallyNotFindObject(t, crbName, &crb)
+	})
 
-	It("Should backfill missing RoleBindings and ClusterRoleBindings", func(ctx SpecContext) {
+	t.Run("Should backfill missing RoleBindings and ClusterRoleBindings", func(t *testing.T) {
 		imageRef := registry.MustUpsertTag("app7", "latest")
 		app := makeApp("app7", imageRef)
-		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+		require.NoError(t, k8sClient.Create(ctx, &app))
 
 		var rb, rbClusterRole rbacv1.RoleBinding
 		var crb rbacv1.ClusterRoleBinding
@@ -435,69 +408,69 @@ var _ = Describe("Application controller", func() {
 		rbClusterRoleName := mkName(app.Namespace, "app7-clusterrole-my-cluster-role-for-namespace")
 		crbName := mkName("", "default-app7-clusterrole-my-cluster-role")
 
-		By("Creating the role bindings")
-		EventuallyGetObject(ctx, rbName, &rb)
-		EventuallyGetObject(ctx, rbClusterRoleName, &rbClusterRole)
-		EventuallyGetObject(ctx, crbName, &crb)
+		// Create the role bindings
+		EventuallyGetObject(t, rbName, &rb)
+		EventuallyGetObject(t, rbClusterRoleName, &rbClusterRole)
+		EventuallyGetObject(t, crbName, &crb)
 
-		By("Manually deleting a RoleBinding")
+		// Manually delete a RoleBinding
 		err := k8sClient.Delete(ctx, &rb)
-		Expect(err).NotTo(HaveOccurred())
+		require.NoError(t, err)
 
-		By("Eventually backfilling the RoleBinding")
-		EventuallyGetObject(ctx, rbName, &rb)
+		// Eventually backfills the RoleBinding
+		EventuallyGetObject(t, rbName, &rb)
 
-		By("Manually deleting a RoleBinding for a ClusterRole")
+		// Manually delete a RoleBinding for a ClusterRole
 		err = k8sClient.Delete(ctx, &rbClusterRole)
-		Expect(err).NotTo(HaveOccurred())
+		require.NoError(t, err)
 
-		By("Eventually backfilling the RoleBinding for a ClusterRole")
-		EventuallyGetObject(ctx, rbClusterRoleName, &rbClusterRole)
+		// Eventually backfills the RoleBinding for a ClusterRole
+		EventuallyGetObject(t, rbClusterRoleName, &rbClusterRole)
 
-		By("Manually deleting a ClusterRoleBinding")
+		// Manually delete a ClusterRoleBinding
 		err = k8sClient.Delete(ctx, &crb)
-		Expect(err).NotTo(HaveOccurred())
+		require.NoError(t, err)
 
-		By("Eventually backfilling the ClusterRoleBinding")
-		EventuallyGetObject(ctx, crbName, &crb)
-	}, SpecTimeout(5*time.Second))
+		// Eventually backfills the ClusterRoleBinding
+		EventuallyGetObject(t, crbName, &crb)
+	})
 
-	It("Should set status conditions", func(ctx SpecContext) {
+	t.Run("Should set status conditions", func(t *testing.T) {
 		imageRef := registry.MustUpsertTag("app8", "latest")
 		app := makeApp("app8", imageRef)
-		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+		require.NoError(t, k8sClient.Create(ctx, &app))
 
-		By("Setting the conditions after creation")
-		EventuallyHaveCondition(ctx, &app, "Ready", metav1.ConditionUnknown, "Reconciling")
+		// Sets the conditions after creation
+		EventuallyHaveCondition(t, &app, "Ready", metav1.ConditionUnknown, "Reconciling")
 
-		By("An issue creating an IngressRoute")
-		EventuallyUpdateApp(ctx, &app, func() {
+		// An issue creating an IngressRoute
+		EventuallyUpdateApp(t, &app, func() {
 			app.Spec.Ingress.Host = "---"
 		})
 
-		By("Setting the Ready status condition to False")
-		EventuallyHaveCondition(ctx, &app, "Ready", metav1.ConditionFalse, "IngressRouteUpsertFailed")
+		// Sets the Ready status condition to False
+		EventuallyHaveCondition(t, &app, "Ready", metav1.ConditionFalse, "IngressRouteUpsertFailed")
 
-		By("Fixing the ingress")
-		EventuallyUpdateApp(ctx, &app, func() {
+		// Fix the ingress
+		EventuallyUpdateApp(t, &app, func() {
 			app.Spec.Ingress.Host = "foo.example.com"
 		})
 
-		By("Deployment becoming Available")
+		// Deployment becomes Available
 		deployName := mkName(app.Namespace, app.Name)
-		SetDeploymentAvailableStatus(ctx, deployName, true, "MinimumReplicasAvailable")
+		SetDeploymentAvailableStatus(t, deployName, true, "MinimumReplicasAvailable")
 
-		By("Setting the Ready status condition to True")
-		EventuallyHaveCondition(ctx, &app, "Ready", metav1.ConditionTrue, "MinimumReplicasAvailable")
+		// Sets the Ready status condition to True
+		EventuallyHaveCondition(t, &app, "Ready", metav1.ConditionTrue, "MinimumReplicasAvailable")
 
-		By("Deployment becoming unavailable")
-		SetDeploymentAvailableStatus(ctx, deployName, false, "MinimumReplicasUnavailable")
+		// Deployment becomes unavailable
+		SetDeploymentAvailableStatus(t, deployName, false, "MinimumReplicasUnavailable")
 
-		By("Setting the Ready status condition to False")
-		EventuallyHaveCondition(ctx, &app, "Ready", metav1.ConditionFalse, "MinimumReplicasUnavailable")
-	}, SpecTimeout(5*time.Second))
+		// Sets the Ready status condition to False
+		EventuallyHaveCondition(t, &app, "Ready", metav1.ConditionFalse, "MinimumReplicasUnavailable")
+	})
 
-	It("Should create PodMonitor with overrides", func(ctx SpecContext) {
+	t.Run("Should create PodMonitor with overrides", func(t *testing.T) {
 		imageRef := registry.MustUpsertTag("app9", "latest")
 		app := makeApp("app9", imageRef)
 		app.Spec.Metrics = &yarotskymev1alpha1.Metrics{
@@ -505,169 +478,82 @@ var _ = Describe("Application controller", func() {
 			PortName: "http",
 			Path:     "/mymetrics",
 		}
-		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+		require.NoError(t, k8sClient.Create(ctx, &app))
 
-		By("Creating the PodMonitor")
+		// Creates the PodMonitor
 		var pm prometheusv1.PodMonitor
 		pmName := mkName(app.Namespace, app.Name)
-		EventuallyGetObject(ctx, pmName, &pm, func(g Gomega) {
-			g.Expect(pm.Spec.PodMetricsEndpoints).To(ConsistOf(
-				prometheusv1.PodMetricsEndpoint{
-					Port: "http",
-					Path: "/mymetrics",
-				},
-			))
+		EventuallyGetObject(t, pmName, &pm, func(t require.TestingT) {
+			assert.ElementsMatch(t, pm.Spec.PodMetricsEndpoints, []prometheusv1.PodMetricsEndpoint{{
+				Port: "http",
+				Path: "/mymetrics",
+			}})
 		})
-	}, SpecTimeout(5*time.Second))
+	})
 
-	It("Should remove PodMonitor when disabled", func(ctx SpecContext) {
+	t.Run("Should remove PodMonitor when disabled", func(t *testing.T) {
 		imageRef := registry.MustUpsertTag("app10", "latest")
 		app := makeApp("app10", imageRef)
-		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+		require.NoError(t, k8sClient.Create(ctx, &app))
 
 		name := mkName(app.Namespace, app.Name)
 		var mon prometheusv1.PodMonitor
 
-		By("Creating the PodMonitor")
-		EventuallyGetObject(ctx, name, &mon)
+		// Create the PodMonitor
+		EventuallyGetObject(t, name, &mon)
 
-		By("Updating the Application")
-		EventuallyUpdateApp(ctx, &app, func() {
+		// Update the Application
+		EventuallyUpdateApp(t, &app, func() {
 			app.Spec.Metrics.Enabled = false
 		})
 
-		By("Eventually removing the PodMonitor")
-		EventuallyNotFindObject(ctx, name, &mon)
-	}, SpecTimeout(5*time.Second))
+		// Eventually removes the PodMonitor
+		EventuallyNotFindObject(t, name, &mon)
+	})
 
-	It("Should determine whether Prometheus is supported", func(ctx SpecContext) {
+	t.Run("Should determine whether Prometheus is supported", func(t *testing.T) {
 		hasPrometheus, err := k8s.IsPrometheusOperatorInstalled(cfg)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(hasPrometheus).To(BeTrue())
-	}, SpecTimeout(5*time.Second))
+		require.NoError(t, err)
+		assert.True(t, hasPrometheus)
+	})
 
-	It("Should remove IngressRoute when disabled", func(ctx SpecContext) {
+	t.Run("Should remove IngressRoute when disabled", func(t *testing.T) {
 		imageRef := registry.MustUpsertTag("app11", "latest")
 		app := makeApp("app11", imageRef)
-		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+		require.NoError(t, k8sClient.Create(ctx, &app))
 
 		name := mkName(app.Namespace, app.Name)
 		var ing traefikv1alpha1.IngressRoute
 
-		By("Creating the IngressRoute")
-		EventuallyGetObject(ctx, name, &ing)
+		// Create the IngressRoute
+		EventuallyGetObject(t, name, &ing)
 
-		By("Updating the Application")
-		EventuallyUpdateApp(ctx, &app, func() {
+		// Update the Application
+		EventuallyUpdateApp(t, &app, func() {
 			app.Spec.Ingress = nil
 		})
 
-		By("Eventually removing the ingress")
-		EventuallyNotFindObject(ctx, name, &ing)
-	}, SpecTimeout(5*time.Second))
+		// Eventually removes the ingress
+		EventuallyNotFindObject(t, name, &ing)
+	})
 
-	It("Should remove Load Balancer service when disabled", func(ctx SpecContext) {
+	t.Run("Should remove Load Balancer service when disabled", func(t *testing.T) {
 		imageRef := registry.MustUpsertTag("app12", "latest")
 		app := makeApp("app12", imageRef)
-		Expect(k8sClient.Create(ctx, &app)).Should(Succeed())
+		require.NoError(t, k8sClient.Create(ctx, &app))
 
 		name := mkName(app.Namespace, fmt.Sprintf("%s-loadbalancer", app.Name))
 		var svc corev1.Service
 
-		By("Creating the LoadBalancer Service")
-		EventuallyGetObject(ctx, name, &svc)
+		// Create the LoadBalancer Service
+		EventuallyGetObject(t, name, &svc)
 
-		By("Updating the Application")
-		EventuallyUpdateApp(ctx, &app, func() {
+		// Update the Application
+		EventuallyUpdateApp(t, &app, func() {
 			app.Spec.LoadBalancer = nil
 		})
 
-		By("Eventually removing the LoadBalancer Service")
-		EventuallyNotFindObject(ctx, name, &svc)
-	}, SpecTimeout(5*time.Second))
-})
-
-func EventuallyGetObject(ctx context.Context, name types.NamespacedName, obj client.Object, matchFns ...func(g Gomega)) {
-	GinkgoHelper()
-
-	Eventually(func(g Gomega) {
-		err := k8sClient.Get(ctx, name, obj)
-		g.Expect(err).NotTo(HaveOccurred())
-
-		for _, f := range matchFns {
-			f(g)
-		}
-	}).WithContext(ctx).Should(Succeed())
-}
-
-func EventuallyNotFindObject(ctx context.Context, name types.NamespacedName, obj client.Object) {
-	GinkgoHelper()
-
-	Eventually(func(g Gomega) {
-		err := k8sClient.Get(ctx, name, obj)
-		g.Expect(errors.IsNotFound(err)).To(BeTrue())
-	}).WithContext(ctx).Should(Succeed())
-}
-
-func EventuallyHaveCondition(ctx context.Context, app *yarotskymev1alpha1.Application, name string, status metav1.ConditionStatus, reason string) {
-	GinkgoHelper()
-
-	Eventually(func(g Gomega) {
-		err := k8sClient.Get(ctx, mkName(app.Namespace, app.Name), app)
-		g.Expect(err).NotTo(HaveOccurred())
-		g.Expect(app.Status.Conditions).To(ContainElement(
-			SatisfyAll(
-				HaveField("Type", name),
-				HaveField("Status", status),
-				HaveField("Reason", reason),
-			),
-		))
-	}).WithContext(ctx).Should(Succeed())
-}
-
-func EventuallyUpdateApp(ctx context.Context, app *yarotskymev1alpha1.Application, mutateFn func()) {
-	GinkgoHelper()
-
-	Eventually(func(g Gomega) {
-		err := k8sClient.Get(ctx, mkName(app.Namespace, app.Name), app)
-		g.Expect(err).NotTo(HaveOccurred())
-
-		mutateFn()
-		err = k8sClient.Update(ctx, app)
-		g.Expect(err).NotTo(HaveOccurred())
-	}).WithContext(ctx).Should(Succeed())
-}
-
-func SetDeploymentAvailableStatus(ctx context.Context, deployName types.NamespacedName, available bool, reason string) {
-	GinkgoHelper()
-
-	var status corev1.ConditionStatus
-	if available {
-		status = corev1.ConditionTrue
-	} else {
-		status = corev1.ConditionFalse
-	}
-
-	Eventually(func(g Gomega) {
-		var deploy appsv1.Deployment
-		err := k8sClient.Get(ctx, deployName, &deploy)
-		g.Expect(err).NotTo(HaveOccurred())
-
-		deploy.Status.Conditions = []appsv1.DeploymentCondition{
-			{
-				Type:   appsv1.DeploymentAvailable,
-				Status: status,
-				Reason: reason,
-			},
-		}
-		err = k8sClient.Status().Update(ctx, &deploy)
-		g.Expect(err).NotTo(HaveOccurred())
-	}).WithContext(ctx).Should(Succeed())
-}
-
-func mkName(namespace, name string) types.NamespacedName {
-	return types.NamespacedName{
-		Namespace: namespace,
-		Name:      name,
-	}
+		// Eventually removes the LoadBalancer Service
+		EventuallyNotFindObject(t, name, &svc)
+	})
 }

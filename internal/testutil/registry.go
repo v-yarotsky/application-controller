@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"testing"
 
 	"git.home.yarotsky.me/vlad/application-controller/internal/images"
 	"github.com/google/go-containerregistry/pkg/registry"
@@ -14,12 +15,12 @@ import (
 )
 
 type TestRegistry struct {
-	t TestingT
+	t *testing.T
 	*httptest.Server
 	URL *url.URL
 }
 
-func NewTestRegistry(t TestingT) *TestRegistry {
+func NewTestRegistry(t *testing.T) *TestRegistry {
 	s := httptest.NewServer(registry.New())
 	u, err := url.Parse(s.URL)
 	if err != nil {

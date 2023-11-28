@@ -14,19 +14,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package controller_test
 
 import (
 	"context"
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 	"time"
 
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -40,14 +42,19 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
+	"git.home.yarotsky.me/vlad/application-controller/internal/controller"
 	"git.home.yarotsky.me/vlad/application-controller/internal/images"
+	"git.home.yarotsky.me/vlad/application-controller/internal/testutil"
 	prometheusv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	traefikv1alpha1 "github.com/traefik/traefik/v2/pkg/provider/kubernetes/crd/traefikio/v1alpha1"
 	//+kubebuilder:scaffold:imports
 )
 
-// These tests use Ginkgo (BDD-style Go testing framework). Refer to
-// http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
+const (
+	namespace = "default"
+)
 
 var (
 	cfg               *rest.Config
@@ -56,19 +63,13 @@ var (
 	ctx               context.Context
 	cancel            context.CancelFunc
 	imageUpdateEvents chan event.GenericEvent
+	registry          *testutil.TestRegistry
 )
 
-func TestControllers(t *testing.T) {
-	RegisterFailHandler(Fail)
-
-	RunSpecs(t, "Controller Suite")
-}
-
-var _ = BeforeSuite(func() {
-	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
+func initializeTestEnvironment(t *testing.T) {
+	logf.SetLogger(zap.New(zap.UseDevMode(true)))
 	ctx, cancel = context.WithCancel(context.TODO())
 
-	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "..", "config", "crd", "bases"),
@@ -85,68 +86,156 @@ var _ = BeforeSuite(func() {
 			fmt.Sprintf("1.28.0-%s-%s", runtime.GOOS, runtime.GOARCH)),
 	}
 
+	registry = testutil.NewTestRegistry(t)
+
 	var err error
 	// cfg is defined in this file globally.
 	cfg, err = testEnv.Start()
-	Expect(err).NotTo(HaveOccurred())
-	Expect(cfg).NotTo(BeNil())
+	assert.NoError(t, err)
+	assert.NotNil(t, cfg)
 
 	err = yarotskymev1alpha1.AddToScheme(scheme.Scheme)
-	Expect(err).NotTo(HaveOccurred())
+	assert.NoError(t, err)
 
 	err = prometheusv1.AddToScheme(scheme.Scheme)
-	Expect(err).NotTo(HaveOccurred())
+	assert.NoError(t, err)
 
 	err = traefikv1alpha1.AddToScheme(scheme.Scheme)
-	Expect(err).NotTo(HaveOccurred())
+	assert.NoError(t, err)
 
 	//+kubebuilder:scaffold:scheme
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
-	Expect(err).NotTo(HaveOccurred())
-	Expect(k8sClient).NotTo(BeNil())
+	assert.NoError(t, err)
+	assert.NotNil(t, k8sClient)
 
 	k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme.Scheme,
 	})
-	Expect(err).ToNot(HaveOccurred())
+	assert.NoError(t, err)
 
 	watcher, err := images.NewCronImageWatcherWithDefaults(k8sManager.GetClient(), "@every 500ms", nil, 500*time.Millisecond)
-	Expect(err).ToNot(HaveOccurred())
+	assert.NoError(t, err)
 
 	imageUpdateEvents = make(chan event.GenericEvent)
-	err = (&ApplicationReconciler{
+	err = (&controller.ApplicationReconciler{
 		Client:                    k8sManager.GetClient(),
 		Scheme:                    k8sManager.GetScheme(),
 		ImageFinder:               watcher,
 		ImageUpdateEvents:         imageUpdateEvents,
 		DefaultTraefikMiddlewares: []types.NamespacedName{{Namespace: "kube-system", Name: "foo"}},
 		TraefikCNAMETarget:        "traefik.example.com",
-		AuthConfig: AuthConfig{
+		AuthConfig: controller.AuthConfig{
 			AuthPathPrefix:      "/oauth2/",
 			AuthServiceName:     types.NamespacedName{Namespace: "kube-system", Name: "oauth2-proxy"},
 			AuthServicePortName: "http",
 			AuthMiddlewareName:  types.NamespacedName{Namespace: "kube-system", Name: "oauth2"},
 		},
-		Recorder:           k8sManager.GetEventRecorderFor(Name),
+		Recorder:           k8sManager.GetEventRecorderFor(controller.Name),
 		SupportsPrometheus: true,
 		SupportsTraefik:    true,
 	}).SetupWithManager(k8sManager)
-	Expect(err).ToNot(HaveOccurred())
+	assert.NoError(t, err)
 
 	ctxWithLog := log.IntoContext(ctx, logf.Log)
 	go watcher.WatchForNewImages(ctxWithLog, imageUpdateEvents)
 
 	go func() {
-		defer GinkgoRecover()
 		err = k8sManager.Start(ctx)
-		Expect(err).ToNot(HaveOccurred(), "failed to run manager")
+		assert.NoError(t, err)
 	}()
-})
+}
 
-var _ = AfterSuite(func() {
+func tearDownTestEnvironment(t *testing.T) {
 	cancel()
-	By("tearing down the test environment")
 	err := testEnv.Stop()
-	Expect(err).NotTo(HaveOccurred())
-})
+	registry.Close()
+	assert.NoError(t, err)
+}
+
+func EventuallyGetObject(t *testing.T, name types.NamespacedName, obj client.Object, matchFns ...func(t require.TestingT)) {
+	t.Helper()
+
+	eventually(t, func(t *assert.CollectT) {
+		err := k8sClient.Get(context.TODO(), name, obj)
+		assert.NoError(t, err)
+
+		for _, f := range matchFns {
+			f(t)
+		}
+	})
+}
+
+func EventuallyNotFindObject(t *testing.T, name types.NamespacedName, obj client.Object) {
+	t.Helper()
+
+	eventually(t, func(t *assert.CollectT) {
+		err := k8sClient.Get(ctx, name, obj)
+		assert.True(t, errors.IsNotFound(err))
+	})
+}
+
+func EventuallyHaveCondition(t *testing.T, app *yarotskymev1alpha1.Application, name string, status metav1.ConditionStatus, reason string) {
+	t.Helper()
+
+	eventually(t, func(t *assert.CollectT) {
+		err := k8sClient.Get(ctx, mkName(app.Namespace, app.Name), app)
+		require.NoError(t, err)
+		assert.True(t, slices.ContainsFunc(app.Status.Conditions, func(c metav1.Condition) bool {
+			return c.Type == name &&
+				c.Status == status &&
+				c.Reason == reason
+		}))
+	})
+}
+
+func EventuallyUpdateApp(t *testing.T, app *yarotskymev1alpha1.Application, mutateFn func()) {
+	t.Helper()
+
+	eventually(t, func(t *assert.CollectT) {
+		err := k8sClient.Get(ctx, mkName(app.Namespace, app.Name), app)
+		require.NoError(t, err)
+
+		mutateFn()
+		err = k8sClient.Update(ctx, app)
+		require.NoError(t, err)
+	})
+}
+
+func SetDeploymentAvailableStatus(t *testing.T, deployName types.NamespacedName, available bool, reason string) {
+	t.Helper()
+
+	var status corev1.ConditionStatus
+	if available {
+		status = corev1.ConditionTrue
+	} else {
+		status = corev1.ConditionFalse
+	}
+
+	eventually(t, func(t *assert.CollectT) {
+		var deploy appsv1.Deployment
+		err := k8sClient.Get(ctx, deployName, &deploy)
+		require.NoError(t, err)
+
+		deploy.Status.Conditions = []appsv1.DeploymentCondition{
+			{
+				Type:   appsv1.DeploymentAvailable,
+				Status: status,
+				Reason: reason,
+			},
+		}
+		err = k8sClient.Status().Update(ctx, &deploy)
+		require.NoError(t, err)
+	})
+}
+
+func eventually(t *testing.T, f func(t *assert.CollectT)) {
+	assert.EventuallyWithT(t, f, 3*time.Second, 10*time.Millisecond)
+}
+
+func mkName(namespace, name string) types.NamespacedName {
+	return types.NamespacedName{
+		Namespace: namespace,
+		Name:      name,
+	}
+}
