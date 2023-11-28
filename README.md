@@ -3,6 +3,10 @@
 Application Controller provides a simplified way of deploying and _updating_ single-container applications to
 a homelab Kubernetes cluster.
 
+## Project status
+
+I'm making this for personal use. Please feel free to fork & experiment, but do expect breaking changes.
+
 ## Description
 
 Application controller automatically manages the following Kubernetes resources for an Application:
@@ -40,7 +44,8 @@ spec:
     enabled: true
 ```
 
-Expanded example:
+<details>
+<summary>Expanded example</summary>
 
 ```yaml
 apiVersion: yarotsky.me/v1alpha1
@@ -117,7 +122,17 @@ spec:
     name: "my-role"
 ```
 
+</details>
+
 ## Prerequisites
+
+- [Traefik ingress controller](https://docs.k3s.io/networking#traefik-ingress-controller)
+  - Traefik LoadBalancer Service needs to have a DNS record
+    that will be used to create CNAME records for Application ingresses.
+- [ExternalDNS](https://github.com/kubernetes-sigs/external-dns)
+
+<details>
+<summary>Additional configuration for k3s</summary>
 
 ```yaml
 apiVersion: helm.cattle.io/v1
@@ -135,11 +150,17 @@ spec:
           "external-dns.alpha.kubernetes.io/hostname": "my.traefik.ingress.example.com"
 ```
 
+</details>
+
 ## Auth proxy
 
 ### Additional prerequisites
 
+<details>
+<summary>Traefik Middlewares</summary>
+
 ```yaml
+---
 apiVersion: traefik.containo.us/v1alpha1
 kind: Middleware
 metadata:
@@ -154,9 +175,7 @@ spec:
       port: http
     status:
     - "401"
-```
-
-```yaml
+---
 apiVersion: traefik.containo.us/v1alpha1
 kind: Middleware
 metadata:
@@ -171,9 +190,7 @@ spec:
     - "X-Auth-Request-Groups"
     - "X-Auth-Request-Preferred-Username"
     - "X-Auth-Request-User"
-```
-
-```yaml
+---
 apiVersion: traefik.containo.us/v1alpha1
 kind: Middleware
 metadata:
@@ -187,6 +204,8 @@ spec:
     - name: oauth2-forward
       namespace: kube-system
 ```
+
+</details>
 
 Next, install [OAuth2 Proxy](https://github.com/oauth2-proxy/oauth2-proxy), with the following configuration:
 
@@ -226,6 +245,10 @@ The following flags should be supplied to the application controller:
 
 ## Container Image Registry Authentication
 
+Container image registry authentication is handled by utilizing Kubernetes Secrets.
+See [Specifying imagePullSecrets on a Pod](https://kubernetes.io/docs/concepts/containers/images/#specifying-imagepullsecrets-on-a-pod).
+
+Use `--image-pull-secret` to supply secret names (the flag can be used multiple times).
 
 ## Monitoring
 
