@@ -85,6 +85,20 @@ func (f *ingressRouteMutator) Mutate(ctx context.Context, app *yarotskymev1alpha
 
 		svcName := f.namer.ServiceName()
 
+		var middlewares []types.NamespacedName
+
+		if ms := app.Spec.Ingress.TraefikMiddlewares; len(ms) > 0 {
+			middlewares = make([]types.NamespacedName, len(ms))
+			for i, m := range ms {
+				middlewares[i] = types.NamespacedName{
+					Namespace: m.Namespace,
+					Name:      m.Name,
+				}
+			}
+		} else {
+			middlewares = f.DefaultTraefikMiddlewares
+		}
+
 		if app.Spec.Ingress.Auth != nil && app.Spec.Ingress.Auth.Enabled {
 			if err := f.AuthConfig.Validate(); err != nil {
 				return err
@@ -94,7 +108,7 @@ func (f *ingressRouteMutator) Mutate(ctx context.Context, app *yarotskymev1alpha
 				{
 					Kind:        "Rule",
 					Match:       fmt.Sprintf("Host(`%s`) && PathPrefix(`%s`)", app.Spec.Ingress.Host, f.AuthPathPrefix),
-					Middlewares: f.middlewares(f.DefaultTraefikMiddlewares),
+					Middlewares: f.middlewares(middlewares),
 					Services: []traefikv1alpha1.Service{
 						{
 							LoadBalancerSpec: traefikv1alpha1.LoadBalancerSpec{
@@ -109,7 +123,7 @@ func (f *ingressRouteMutator) Mutate(ctx context.Context, app *yarotskymev1alpha
 				{
 					Kind:        "Rule",
 					Match:       fmt.Sprintf("Host(`%s`)", app.Spec.Ingress.Host),
-					Middlewares: f.middlewares(append(f.DefaultTraefikMiddlewares, f.AuthMiddlewareName)),
+					Middlewares: f.middlewares(append(middlewares, f.AuthMiddlewareName)),
 					Services: []traefikv1alpha1.Service{
 						{
 							LoadBalancerSpec: traefikv1alpha1.LoadBalancerSpec{

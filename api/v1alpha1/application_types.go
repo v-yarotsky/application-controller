@@ -284,11 +284,12 @@ type Ingress struct {
 	// Guesses `web` or `http` by default.
 	PortName string `json:"portName,omitempty"`
 
-	// traefik middleware names, e.g. "https-redirect".
-	// Middlewares are assumed to:
-	// - be configured via Traefik CRDs, and
-	// - be in `kube-system` namespace.
-	TraefikMiddlewares []string `json:"traefikMiddlewares,omitempty"`
+	TraefikMiddlewares []TraefikMiddlewareRef `json:"traefikMiddlewares,omitempty"`
+}
+
+type TraefikMiddlewareRef struct {
+	Namespace string `json:"namespace,omitempty"`
+	Name      string `json:"name"`
 }
 
 type IngressAuth struct {
