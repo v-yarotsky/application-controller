@@ -294,6 +294,9 @@ type TraefikMiddlewareRef struct {
 
 type IngressAuth struct {
 	Enabled bool `json:"enabled"`
+
+	// Do not protect the following path prefixes with authentication proxy (e.g. `/api/`)
+	ExcludePathPrefixes []string `json:"excludePrefixes,omitempty"`
 }
 
 type LoadBalancer struct {

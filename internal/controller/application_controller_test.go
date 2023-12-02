@@ -23,7 +23,9 @@ import (
 
 func TestApplicationController(t *testing.T) {
 	initializeTestEnvironment(t)
-	defer tearDownTestEnvironment(t)
+	t.Cleanup(func() {
+		tearDownTestEnvironment(t)
+	})
 
 	makeApp := func(name string, imageRef *images.ImageRef) yarotskymev1alpha1.Application {
 		return yarotskymev1alpha1.Application{

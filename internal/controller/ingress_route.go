@@ -120,28 +120,50 @@ func (f *ingressRouteMutator) Mutate(ctx context.Context, app *yarotskymev1alpha
 						},
 					},
 				},
+			}
+
+			targetServices := []traefikv1alpha1.Service{
 				{
-					Kind:        "Rule",
-					Match:       fmt.Sprintf("Host(`%s`)", app.Spec.Ingress.Host),
-					Middlewares: f.middlewares(append(middlewares, f.AuthMiddlewareName)),
-					Services: []traefikv1alpha1.Service{
-						{
-							LoadBalancerSpec: traefikv1alpha1.LoadBalancerSpec{
-								Kind:      "Service",
-								Namespace: svcName.Namespace,
-								Name:      svcName.Name,
-								Port:      intstr.FromString(portName),
-							},
-						},
+					LoadBalancerSpec: traefikv1alpha1.LoadBalancerSpec{
+						Kind:      "Service",
+						Namespace: svcName.Namespace,
+						Name:      svcName.Name,
+						Port:      intstr.FromString(portName),
 					},
 				},
 			}
+			for _, pathPrefix := range app.Spec.Ingress.Auth.ExcludePathPrefixes {
+				var rule string
+				if strings.HasSuffix(pathPrefix, "/") {
+					rule = fmt.Sprintf("Host(`%s`) && PathPrefix(`%s`)", app.Spec.Ingress.Host, pathPrefix)
+				} else {
+					rule = fmt.Sprintf("Host(`%s`) && Path(`%s`)", app.Spec.Ingress.Host, pathPrefix)
+				}
+
+				ing.Spec.Routes = append(ing.Spec.Routes,
+					traefikv1alpha1.Route{
+						Kind:        "Rule",
+						Match:       rule,
+						Middlewares: f.middlewares(middlewares),
+						Services:    targetServices,
+					},
+				)
+			}
+
+			ing.Spec.Routes = append(ing.Spec.Routes,
+				traefikv1alpha1.Route{
+					Kind:        "Rule",
+					Match:       fmt.Sprintf("Host(`%s`)", app.Spec.Ingress.Host),
+					Middlewares: f.middlewares(append(middlewares, f.AuthMiddlewareName)),
+					Services:    targetServices,
+				},
+			)
 		} else {
 			ing.Spec.Routes = []traefikv1alpha1.Route{
 				{
 					Kind:        "Rule",
 					Match:       fmt.Sprintf("Host(`%s`)", app.Spec.Ingress.Host),
-					Middlewares: f.middlewares(f.DefaultTraefikMiddlewares),
+					Middlewares: f.middlewares(middlewares),
 					Services: []traefikv1alpha1.Service{
 						{
 							LoadBalancerSpec: traefikv1alpha1.LoadBalancerSpec{

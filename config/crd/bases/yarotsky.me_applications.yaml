@@ -267,6 +267,12 @@ spec:
                     properties:
                       enabled:
                         type: boolean
+                      excludePrefixes:
+                        description: Do not protect the following path prefixes with
+                          authentication proxy (e.g. `/api/`)
+                        items:
+                          type: string
+                        type: array
                     required:
                     - enabled
                     type: object

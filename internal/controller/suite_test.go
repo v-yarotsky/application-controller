@@ -91,31 +91,31 @@ func initializeTestEnvironment(t *testing.T) {
 	var err error
 	// cfg is defined in this file globally.
 	cfg, err = testEnv.Start()
-	assert.NoError(t, err)
-	assert.NotNil(t, cfg)
+	require.NoError(t, err)
+	require.NotNil(t, cfg)
 
 	err = yarotskymev1alpha1.AddToScheme(scheme.Scheme)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	err = prometheusv1.AddToScheme(scheme.Scheme)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	err = traefikv1alpha1.AddToScheme(scheme.Scheme)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	//+kubebuilder:scaffold:scheme
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
-	assert.NoError(t, err)
-	assert.NotNil(t, k8sClient)
+	require.NoError(t, err)
+	require.NotNil(t, k8sClient)
 
 	k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme.Scheme,
 	})
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	watcher, err := images.NewCronImageWatcherWithDefaults(k8sManager.GetClient(), "@every 500ms", nil, 500*time.Millisecond)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	imageUpdateEvents = make(chan event.GenericEvent)
 	err = (&controller.ApplicationReconciler{
@@ -135,22 +135,22 @@ func initializeTestEnvironment(t *testing.T) {
 		SupportsPrometheus: true,
 		SupportsTraefik:    true,
 	}).SetupWithManager(k8sManager)
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	ctxWithLog := log.IntoContext(ctx, logf.Log)
 	go watcher.WatchForNewImages(ctxWithLog, imageUpdateEvents)
 
 	go func() {
 		err = k8sManager.Start(ctx)
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	}()
 }
 
 func tearDownTestEnvironment(t *testing.T) {
 	cancel()
 	err := testEnv.Stop()
+	require.NoError(t, err)
 	registry.Close()
-	assert.NoError(t, err)
 }
 
 func EventuallyGetObject(t *testing.T, name types.NamespacedName, obj client.Object, matchFns ...func(t require.TestingT)) {

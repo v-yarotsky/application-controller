@@ -117,6 +117,24 @@ func TestIngressRouteMutator(t *testing.T) {
 		assert.Equal(t, "https-redirect", ing.Spec.Routes[0].Middlewares[0].Name)
 	})
 
+	t.Run(`allows middleware to be overridden`, func(t *testing.T) {
+		app := makeApp()
+		app.Spec.Ingress.TraefikMiddlewares = []yarotskymev1alpha1.TraefikMiddlewareRef{
+			{
+				Namespace: "kube-system",
+				Name:      "my-special-middleware",
+			},
+		}
+
+		var ing traefikv1alpha1.IngressRoute
+		err := makeMutator(&app).Mutate(context.TODO(), &app, &ing)()
+		assert.NoError(t, err)
+
+		assert.Len(t, ing.Spec.Routes[0].Middlewares, 1)
+		assert.Equal(t, "kube-system", ing.Spec.Routes[0].Middlewares[0].Namespace)
+		assert.Equal(t, "my-special-middleware", ing.Spec.Routes[0].Middlewares[0].Name)
+	})
+
 	t.Run(`adds the auth service route when auth proxy is enabled`, func(t *testing.T) {
 		app := makeApp()
 		app.Spec.Ingress.Auth = &yarotskymev1alpha1.IngressAuth{
@@ -149,6 +167,61 @@ func TestIngressRouteMutator(t *testing.T) {
 		assert.Len(t, r2.Middlewares, 2)
 		assert.Equal(t, "https-redirect", r2.Middlewares[0].Name)
 		assert.Equal(t, "oauth2", r2.Middlewares[1].Name)
+	})
+
+	t.Run(`allows excluding paths from auth proxy protection`, func(t *testing.T) {
+		app := makeApp()
+		app.Spec.Ingress.Auth = &yarotskymev1alpha1.IngressAuth{
+			Enabled:             true,
+			ExcludePathPrefixes: []string{"/api/", "/metrics"},
+		}
+
+		var ing traefikv1alpha1.IngressRoute
+		err := makeMutator(&app).Mutate(context.TODO(), &app, &ing)()
+		assert.NoError(t, err)
+
+		assert.Len(t, ing.Spec.Routes, 4)
+
+		r1 := ing.Spec.Routes[0]
+		assert.Equal(t, "Host(`myapp.example.com`) && PathPrefix(`/oauth2/`)", r1.Match)
+		assert.Equal(t, "Service", r1.Services[0].Kind)
+		assert.Equal(t, "oauth2-proxy", r1.Services[0].Name)
+		assert.Equal(t, "kube-system", r1.Services[0].Namespace)
+		assert.Equal(t, "http", r1.Services[0].Port.StrVal)
+
+		assert.Len(t, r1.Middlewares, 1)
+		assert.Equal(t, "https-redirect", r1.Middlewares[0].Name)
+
+		r2 := ing.Spec.Routes[1]
+		assert.Equal(t, "Host(`myapp.example.com`) && PathPrefix(`/api/`)", r2.Match)
+		assert.Equal(t, "Service", r2.Services[0].Kind)
+		assert.Equal(t, "myapp", r2.Services[0].Name)
+		assert.Equal(t, "default", r2.Services[0].Namespace)
+		assert.Equal(t, "myport", r2.Services[0].Port.StrVal)
+
+		assert.Len(t, r2.Middlewares, 1)
+		assert.Equal(t, "https-redirect", r2.Middlewares[0].Name)
+
+		r3 := ing.Spec.Routes[2]
+		assert.Equal(t, "Host(`myapp.example.com`) && Path(`/metrics`)", r3.Match)
+		assert.Equal(t, "Service", r3.Services[0].Kind)
+		assert.Equal(t, "myapp", r3.Services[0].Name)
+		assert.Equal(t, "default", r3.Services[0].Namespace)
+		assert.Equal(t, "myport", r3.Services[0].Port.StrVal)
+
+		assert.Len(t, r3.Middlewares, 1)
+		assert.Equal(t, "https-redirect", r3.Middlewares[0].Name)
+
+		r4 := ing.Spec.Routes[3]
+		assert.Equal(t, "Host(`myapp.example.com`)", r4.Match)
+		assert.Equal(t, "Service", r4.Services[0].Kind)
+		assert.Equal(t, "myapp", r4.Services[0].Name)
+		assert.Equal(t, "default", r4.Services[0].Namespace)
+		assert.Equal(t, "myport", r4.Services[0].Port.StrVal)
+
+		assert.Len(t, r4.Middlewares, 2)
+		assert.Equal(t, "https-redirect", r4.Middlewares[0].Name)
+		assert.Equal(t, "oauth2", r4.Middlewares[1].Name)
 	})
 
 	t.Run(`fails if auth is not configured properly`, func(t *testing.T) {
