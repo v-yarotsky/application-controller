@@ -208,10 +208,10 @@ func (w *cronImageWatcher) OnImageUpdated(ctx context.Context, imageRepo string)
 
 	for _, app := range apps {
 		imageSpec := app.Spec.Image
-		if imageSpec.Repository != imageRepo {
-			continue
+		if imageSpec.Repository == imageRepo {
+			app := app
+			go w.enqueueReconciliation(ctx, &app)
 		}
-		go w.enqueueReconciliation(ctx, &app)
 	}
 }
 
