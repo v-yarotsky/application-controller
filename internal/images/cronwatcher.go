@@ -133,13 +133,32 @@ func (w *cronImageWatcher) reconcileSchedules(ctx context.Context) {
 }
 
 func (w *cronImageWatcher) enqueueReconciliation(ctx context.Context, app *yarotskymev1alpha1.Application) {
-	log := log.FromContext(ctx)
+	log := log.FromContext(ctx).WithValues("namespace", app.Namespace, "app", app.Name)
 
 	log.Info("Clearing cached image")
 	w.imageCache.Delete(imageSpecKey{app.Spec.Image})
 
 	log.Info("Scheduling reconciliation to check for image updates")
 	w.updateChan <- app
+}
+
+func (w *cronImageWatcher) OnImageUpdated(ctx context.Context, imageRepo string) {
+	log := log.FromContext(ctx).WithValues("repository", imageRepo)
+
+	log.Info("Clearing cache images")
+	apps, err := w.lister.ListApplications(ctx)
+	if err != nil {
+		log.Error(err, "failed to eagerly reconcile Applications on container publish")
+		return
+	}
+
+	for _, app := range apps {
+		imageSpec := app.Spec.Image
+		if imageSpec.Repository != imageRepo {
+			continue
+		}
+		go w.enqueueReconciliation(ctx, &app)
+	}
 }
 
 var _ ImageWatcher = &cronImageWatcher{}

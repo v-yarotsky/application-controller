@@ -6,10 +6,12 @@ import (
 	"time"
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
+	"github.com/go-logr/logr/testr"
 	"github.com/stretchr/testify/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 func TestCronImageWatcher(t *testing.T) {
@@ -54,7 +56,7 @@ func TestCronImageWatcher(t *testing.T) {
 	scheduler := newFakeScheduler(t)
 	w := NewCronImageWatcher(lister, scheduler, finder, trigger)
 
-	ctx, done := context.WithCancel(context.Background())
+	ctx, done := context.WithCancel(log.IntoContext(context.Background(), testr.New(t)))
 	reconcileChan := make(chan event.GenericEvent)
 	go w.WatchForNewImages(ctx, reconcileChan)
 	defer done()
@@ -134,4 +136,29 @@ func TestCronImageWatcher(t *testing.T) {
 	w.FindImage(ctx, app2.Spec.Image)
 
 	assert.Equal(t, 2, finder.RepositoryCallCount(app2.Spec.Image.Repository))
+
+	// Allows forced image updates
+	drainChan(t, reconcileChan)
+	w.OnImageUpdated(ctx, "registry.example.com/myimage2")
+	appsScheduledForReconciliation = map[string]bool{}
+	assert.EventuallyWithT(t, func(collect *assert.CollectT) {
+		select {
+		case evt := <-reconcileChan:
+			appsScheduledForReconciliation[evt.Object.GetName()] = true
+		default:
+		}
+
+		assert.Len(t, appsScheduledForReconciliation, 1)
+	}, 10*time.Millisecond, time.Millisecond, "expected app to be scheduled for reconciliation on container image push")
+	assert.Equal(t, map[string]bool{"app2": true}, appsScheduledForReconciliation)
+}
+
+func drainChan[T any](t *testing.T, c chan T) {
+	for {
+		select {
+		case <-c:
+		default:
+			return
+		}
+	}
 }
