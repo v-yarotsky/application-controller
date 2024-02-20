@@ -70,6 +70,7 @@ func main() {
 	var traefikAuthMiddlewareName flagext.NamespacedName
 	var traefikCNAMETarget string
 	var defaultUpdateSchedule flagext.CronSchedule = "*/5 * * * * *"
+	var giteaHostname string
 
 	flag.StringVar(&metricsAddr, "metrics-bind-address", ":8080", "The address the metric endpoint binds to.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -86,6 +87,7 @@ func main() {
 	flag.StringVar(&traefikCNAMETarget, "traefik-cname-target", "", "Ingress CNAME target (must point at Traefik load balancer)")
 	flag.Var(&defaultUpdateSchedule, "default-update-schedule", "Default Cron schedule for image update checks (default: `@every 5m`);"+
 		" See https://pkg.go.dev/github.com/robfig/cron#hdr-CRON_Expression_Format")
+	flag.StringVar(&giteaHostname, "gitea-hostname", "", "Gitea hostname to listen to package webhooks from")
 
 	opts := zap.Options{
 		Development: true,
@@ -185,6 +187,11 @@ func main() {
 
 	setupLog.Info("starting application update watcher")
 	go imageWatcher.WatchForNewImages(ctx, imageUpdateEvents)
+
+	if giteaHostname != "" {
+		setupLog.Info("Starting Gitea package webhook server")
+		go imageWatcher.ServeWebhook(ctx, giteaHostname)
+	}
 
 	setupLog.Info("starting manager")
 	if err := mgr.Start(ctx); err != nil {

@@ -46,3 +46,5 @@ spec:
         - "--traefik-auth-middleware-name=kube-system/forward-auth"
         - "--default-update-schedule"
         - "0 11 * * *"
+        - "--gitea-hostname"
+        - "git.home.yarotsky.me"

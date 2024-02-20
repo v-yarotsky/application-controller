@@ -284,6 +284,7 @@ In addition to the above metrics, the following metrics are instrumented:
 - [X] Prune Ingress, Service (LoadBalancer) when `ingress` or `loadBalancer` are removed.
 - [X] Allow specifying a mixture of container SecurityContext and PodSecurityContext (rather, allow setting `fsGroup` on pod template level)
 - [ ] Validating admission webhook? Or at least write tests to make sure we have nice error messages
+- [ ] Enforce 15 characters max on port name
 
 ## Getting Started
 You’ll need a Kubernetes cluster to run against. You can use [KIND](https://sigs.k8s.io/kind) to get a local cluster for testing, or run against a remote cluster.

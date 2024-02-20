@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
 	"time"
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
@@ -82,6 +84,58 @@ func (w *cronImageWatcher) WatchForNewImages(ctx context.Context, c chan event.G
 			c <- event.GenericEvent{Object: app}
 		}
 	}
+}
+
+type GiteaPackageWebhook struct {
+	Action  string `json:"action"`
+	Package struct {
+		Type  string `json:"type"`
+		Owner struct {
+			Username string `json:"username"`
+		} `json:"owner"`
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	} `json:"package"`
+}
+
+func (cw *cronImageWatcher) ServeWebhook(ctx context.Context, giteaHostname string) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/webhooks/create-package", func(w http.ResponseWriter, r *http.Request) {
+		log := log.FromContext(r.Context())
+		eventType := r.Header.Get("X-Gitea-Event-Type")
+		if eventType != "package" {
+			log.Info("Unsupported X-Gitea-Event-Type", "type", eventType)
+			http.Error(w, "Currently only accepting X-Gitea-Event-Type: package", http.StatusBadRequest)
+			return
+		}
+		hook := GiteaPackageWebhook{}
+		err := json.NewDecoder(r.Body).Decode(&hook)
+		if err != nil {
+			log.Error(err, "failed to parse webhook payload")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if hook.Package.Type != "container" {
+			err := fmt.Errorf("Only container packages are supported, got %q", hook.Package.Type)
+			log.Error(err, "webhook failed")
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if hook.Action != "created" {
+			err := fmt.Errorf("Currently only supporting package creation events, got action %q", hook.Action)
+			log.Error(err, "webhook failed")
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		imageRepo := fmt.Sprintf("%s/%s/%s", giteaHostname, hook.Package.Owner.Username, hook.Package.Name)
+		cw.OnImageUpdated(r.Context(), imageRepo)
+	})
+	s := &http.Server{
+		Addr:        ":3000",
+		Handler:     mux,
+		BaseContext: func(l net.Listener) context.Context { return ctx },
+	}
+	s.ListenAndServe()
 }
 
 func (w *cronImageWatcher) FindImage(ctx context.Context, spec yarotskymev1alpha1.ImageSpec) (*ImageRef, error) {
