@@ -1,13 +1,17 @@
 package images
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
 	"testing"
 	"time"
 
 	yarotskymev1alpha1 "git.home.yarotsky.me/vlad/application-controller/api/v1alpha1"
 	"github.com/go-logr/logr/testr"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -139,7 +143,12 @@ func TestCronImageWatcher(t *testing.T) {
 
 	// Allows forced image updates
 	drainChan(t, reconcileChan)
-	w.OnImageUpdated(ctx, "registry.example.com/myimage2")
+	go w.ServeWebhook(ctx)
+	payload, err := json.Marshal(map[string]string{"image_name": "registry.example.com/myimage2"})
+	require.NoError(t, err)
+	res, err := http.Post("http://localhost:3000/webhooks/image", "application/json", bytes.NewReader(payload))
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, res.StatusCode)
 	appsScheduledForReconciliation = map[string]bool{}
 	assert.EventuallyWithT(t, func(collect *assert.CollectT) {
 		select {

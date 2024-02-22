@@ -101,7 +101,7 @@ func (cw *cronImageWatcher) ServeWebhook(ctx context.Context) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		cw.OnImageUpdated(r.Context(), hook.ImageName)
+		cw.onImageUpdated(r.Context(), hook.ImageName)
 	})
 	s := &http.Server{
 		Addr:        ":3000",
@@ -169,7 +169,7 @@ func (w *cronImageWatcher) enqueueReconciliation(ctx context.Context, app *yarot
 	w.updateChan <- app
 }
 
-func (w *cronImageWatcher) OnImageUpdated(ctx context.Context, imageRepo string) {
+func (w *cronImageWatcher) onImageUpdated(ctx context.Context, imageRepo string) {
 	log := log.FromContext(ctx).WithValues("repository", imageRepo)
 
 	log.Info("Clearing cache images")
