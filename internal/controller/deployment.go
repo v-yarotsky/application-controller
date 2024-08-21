@@ -40,6 +40,7 @@ func (f *deploymentMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.
 
 		podTemplateSpec := &deploy.Spec.Template.Spec
 		podTemplateSpec.ServiceAccountName = f.namer.ServiceAccountName().Name
+		podTemplateSpec.NodeSelector = app.Spec.NodeSelector
 
 		if app.Spec.HostNetwork {
 			podTemplateSpec.HostNetwork = true

@@ -195,4 +195,15 @@ func TestDeploymentMutator(t *testing.T) {
 
 		assert.Equal(t, corev1.URISchemeHTTP, deploy.Spec.Template.Spec.Containers[0].LivenessProbe.HTTPGet.Scheme)
 	})
+
+	t.Run(`sets nodeSelector when specified`, func(t *testing.T) {
+		app := makeApp()
+		app.Spec.NodeSelector = map[string]string{"foo": "bar"}
+
+		var deploy appsv1.Deployment
+		err := makeMutator(&app).Mutate(context.TODO(), &app, &deploy)()
+		assert.NoError(t, err)
+
+		assert.Equal(t, map[string]string{"foo": "bar"}, deploy.Spec.Template.Spec.NodeSelector)
+	})
 }
