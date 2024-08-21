@@ -144,7 +144,16 @@ func TestCronImageWatcher(t *testing.T) {
 	// Allows forced image updates
 	drainChan(t, reconcileChan)
 	go w.ServeWebhook(ctx)
-	payload, err := json.Marshal(map[string]string{"image_name": "registry.example.com/myimage2"})
+	payload, err := json.Marshal(map[string]interface{}{
+		"events": []interface{}{
+			map[string]interface{}{
+				"action": "push",
+				"target": map[string]interface{}{
+					"repository": "registry.example.com/myimage2",
+				},
+			},
+		},
+	})
 	require.NoError(t, err)
 	res, err := http.Post("http://localhost:3000/webhooks/image", "application/json", bytes.NewReader(payload))
 	require.NoError(t, err)
