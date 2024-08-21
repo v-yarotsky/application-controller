@@ -86,36 +86,22 @@ func (w *cronImageWatcher) WatchForNewImages(ctx context.Context, c chan event.G
 	}
 }
 
-type RegistryNotification struct {
-	Events []struct {
-		Action string `json:"action"`
-		Target struct {
-			Repository string `json:"repository"`
-		} `json:"target"`
-	} `json:"events"`
+type NewContainerImageWebhook struct {
+	ImageName string `json:"image_name"`
 }
 
 func (cw *cronImageWatcher) ServeWebhook(ctx context.Context) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/webhooks/image", func(w http.ResponseWriter, r *http.Request) {
 		log := log.FromContext(r.Context())
-		notification := RegistryNotification{}
-		err := json.NewDecoder(r.Body).Decode(&notification)
+		hook := NewContainerImageWebhook{}
+		err := json.NewDecoder(r.Body).Decode(&hook)
 		if err != nil {
 			log.Error(err, "failed to parse webhook payload")
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		updatedRepositories := make(map[string]bool, 0)
-		for _, e := range notification.Events {
-			if e.Action != "push" {
-				continue
-			}
-			updatedRepositories[e.Target.Repository] = true
-		}
-		for repo := range updatedRepositories {
-			cw.onImageUpdated(r.Context(), repo)
-		}
+		cw.onImageUpdated(r.Context(), hook.ImageName)
 	})
 	s := &http.Server{
 		Addr:        ":3000",
