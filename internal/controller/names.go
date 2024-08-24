@@ -19,8 +19,10 @@ type Namer interface {
 	IngressRouteName() types.NamespacedName
 	RoleBindingName(roleRef rbacv1.RoleRef) types.NamespacedName
 	ClusterRoleBindingName(roleRef rbacv1.RoleRef) types.NamespacedName
+	CronJobName(jobName string) types.NamespacedName
 
 	SelectorLabels() map[string]string
+	CronJobSelectorLabels(jobName string) map[string]string
 }
 
 type simpleNamer struct {
@@ -91,10 +93,26 @@ func (a *simpleNamer) ClusterRoleBindingName(roleRef rbacv1.RoleRef) types.Names
 	}
 }
 
+func (a *simpleNamer) CronJobName(jobName string) types.NamespacedName {
+	return types.NamespacedName{
+		Name:      fmt.Sprintf("%s-%s", a.Name, jobName),
+		Namespace: a.Namespace,
+	}
+}
+
 func (a *simpleNamer) SelectorLabels() map[string]string {
 	return map[string]string{
 		"app.kubernetes.io/name":       a.Name,
 		"app.kubernetes.io/managed-by": Name,
+		"app.kubernetes.io/instance":   "default",
+	}
+}
+
+func (a *simpleNamer) CronJobSelectorLabels(jobName string) map[string]string {
+	return map[string]string{
+		"app.kubernetes.io/name":       jobName,
+		"app.kubernetes.io/managed-by": Name,
+		"app.kubernetes.io/part-of":    a.Name,
 		"app.kubernetes.io/instance":   "default",
 	}
 }

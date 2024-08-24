@@ -45,6 +45,7 @@ import (
 	osdkHandler "github.com/operator-framework/operator-lib/handler"
 	traefikv1alpha1 "github.com/traefik/traefik/v2/pkg/provider/kubernetes/crd/traefikio/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -62,8 +63,8 @@ const (
 
 	FinalizerName = "application.yarotsky.me/finalizer"
 
-	// This is necessary to be able to query a list of RoleBinding objects owned by an Application
-	roleBindingOwnerKey = "metadata.controller"
+	// This is necessary to be able to query lists of objects owned by an Application
+	ownerKey = "metadata.controller"
 )
 
 type eventMap struct {
@@ -132,6 +133,14 @@ var (
 		Deleted:      "PodMonitorDeleted",
 		DeleteFailed: "PodMonitorDeleteFailed",
 	}
+
+	CronJobEvents = eventMap{
+		Created:      "CronJobCreated",
+		Updated:      "CronJobUpdated",
+		UpsertFailed: "CronJobUpsertFailed",
+		Deleted:      "CronJobDeleted",
+		DeleteFailed: "CronJobDeleteFailed",
+	}
 )
 
 // ApplicationReconciler reconciles a Application object
@@ -164,6 +173,7 @@ type ApplicationReconciler struct {
 //+kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles,verbs=bind
 //+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 //+kubebuilder:rbac:groups=monitoring.coreos.com,resources=podmonitors,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=batch,resources=cronjobs,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -251,6 +261,10 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.updateStatusWithError(ctx, &app, err, IngressRouteEvents.UpsertFailed)
 	}
 
+	if err := r.reconcileCronJobs(ctx, &app, namer); err != nil {
+		return r.updateStatusWithError(ctx, &app, err, CronJobEvents.UpsertFailed)
+	}
+
 	if deploy, err := r.reconcileDeployment(ctx, &app, namer); err != nil {
 		return r.updateStatusWithError(ctx, &app, err, DeploymentEvents.UpsertFailed)
 	} else {
@@ -278,7 +292,7 @@ func (r *ApplicationReconciler) reconcileRoleBindings(ctx context.Context, app *
 
 	rbs := &rbacv1.RoleBindingList{}
 
-	err := r.Client.List(ctx, rbs, client.InNamespace(app.Namespace), client.MatchingFields(map[string]string{roleBindingOwnerKey: app.Name}))
+	err := r.Client.List(ctx, rbs, client.InNamespace(app.Namespace), client.MatchingFields(map[string]string{ownerKey: app.Name}))
 	if err != nil {
 		baseLog.Error(err, "failed to get the list of owned RoleBinding objects")
 		return err
@@ -443,6 +457,46 @@ func (r *ApplicationReconciler) reconcileDeployment(ctx context.Context, app *ya
 	return &deploy, nil
 }
 
+func (r *ApplicationReconciler) reconcileCronJobs(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
+	baseLog := log.FromContext(ctx)
+
+	cjs := &batchv1.CronJobList{}
+
+	err := r.Client.List(ctx, cjs, client.InNamespace(app.Namespace), client.MatchingFields(map[string]string{ownerKey: app.Name}))
+	if err != nil {
+		baseLog.Error(err, "failed to get the list of owned RoleBinding objects")
+		return err
+	}
+
+	seenSet := make(map[types.NamespacedName]bool, len(cjs.Items))
+	for _, cj := range cjs.Items {
+		seenSet[types.NamespacedName{Namespace: cj.Namespace, Name: cj.Name}] = false
+	}
+
+	mutator := &cronJobMutator{namer: namer, imageFinder: r.ImageFinder}
+
+	for _, j := range app.Spec.CronJobs {
+		name := namer.CronJobName(j.Name)
+		seenSet[name] = true
+
+		var cj batchv1.CronJob
+		if err := r.ensureResource(ctx, app, name, &cj, mutator.Mutate(ctx, app, &cj, j), CronJobEvents); err != nil {
+			return err
+		}
+	}
+
+	for cjName, seen := range seenSet {
+		if !seen {
+			var cj batchv1.CronJob
+			if err := r.ensureNoResource(ctx, app, cjName, &cj, CronJobEvents); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 func (r *ApplicationReconciler) ensureNoClusterRoleBindings(ctx context.Context, app *yarotskymev1alpha1.Application, namer Namer) error {
 	ownedClusterRoleBindings, err := r.getOwnedClusterRoleBindings(ctx, namer)
 	if err != nil {
@@ -462,7 +516,7 @@ func (r *ApplicationReconciler) getOwnedClusterRoleBindings(ctx context.Context,
 	log := log.FromContext(ctx)
 
 	ownedClusterRoleBindings := &rbacv1.ClusterRoleBindingList{}
-	err := r.Client.List(ctx, ownedClusterRoleBindings, client.MatchingFields(map[string]string{roleBindingOwnerKey: namer.ApplicationName().String()}))
+	err := r.Client.List(ctx, ownedClusterRoleBindings, client.MatchingFields(map[string]string{ownerKey: namer.ApplicationName().String()}))
 	if err != nil {
 		log.Error(err, "failed to get the list of owned ClusterRoleBinding objects")
 		return nil, err
@@ -645,13 +699,30 @@ func (r *ApplicationReconciler) setupIndexes(indexer client.FieldIndexer) error 
 		return err
 	}
 
+	if err := r.setupCronJobIndex(indexer); err != nil {
+		return err
+	}
+
 	return nil
 }
 
 // Index owned RoleBinding objects by owner in our cache
 func (r *ApplicationReconciler) setupRoleBindingIndex(indexer client.FieldIndexer) error {
-	return indexer.IndexField(context.Background(), &rbacv1.RoleBinding{}, roleBindingOwnerKey, func(rawObj client.Object) []string {
+	return indexer.IndexField(context.Background(), &rbacv1.RoleBinding{}, ownerKey, func(rawObj client.Object) []string {
 		rb := rawObj.(*rbacv1.RoleBinding)
+		owner := metav1.GetControllerOf(rb)
+		if !gkutil.IsApplication(gkutil.FromOwnerReference(owner)) {
+			return nil
+		}
+
+		return []string{string(owner.Name)}
+	})
+}
+
+// Index owned CronJob objects by owner in our cache
+func (r *ApplicationReconciler) setupCronJobIndex(indexer client.FieldIndexer) error {
+	return indexer.IndexField(context.Background(), &batchv1.CronJob{}, ownerKey, func(rawObj client.Object) []string {
+		rb := rawObj.(*batchv1.CronJob)
 		owner := metav1.GetControllerOf(rb)
 		if !gkutil.IsApplication(gkutil.FromOwnerReference(owner)) {
 			return nil
@@ -667,7 +738,7 @@ func (r *ApplicationReconciler) setupRoleBindingIndex(indexer client.FieldIndexe
 //
 // [^1]: https://github.com/operator-framework/operator-lib/blob/152ee1fb7f830346e32ae4cf737bb56335903998/handler/enqueue_annotation.go#L159
 func (r *ApplicationReconciler) setupClusterRoleBindingIndex(indexer client.FieldIndexer) error {
-	return indexer.IndexField(context.Background(), &rbacv1.ClusterRoleBinding{}, roleBindingOwnerKey, func(rawObj client.Object) []string {
+	return indexer.IndexField(context.Background(), &rbacv1.ClusterRoleBinding{}, ownerKey, func(rawObj client.Object) []string {
 		rb := rawObj.(*rbacv1.ClusterRoleBinding)
 		annotations := rb.GetAnnotations()
 

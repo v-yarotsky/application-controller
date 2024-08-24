@@ -133,6 +133,14 @@ type ApplicationSpec struct {
 	// +optional
 	// +mapType=atomic
 	NodeSelector map[string]string `json:"nodeSelector,omitempty"`
+
+	// CronJobs defines periodic tasks executed using the application Image
+	// given a schedule and a command to run.
+	// It inherits environment variables, volumes and RBAC role bindings.
+	// +optional
+	// +patchMergeKey=name
+	// +patchStrategy=merge,retainKeys
+	CronJobs []CronJobSpec `json:"cronJobs,omitempty"`
 }
 
 type ImageSpec struct {
@@ -326,6 +334,40 @@ type Metrics struct {
 
 	// Guesses `metrics` or `prometheus` by default.
 	PortName string `json:"portName,omitempty"`
+}
+
+type CronJobSpec struct {
+	Name string `json:"name"`
+
+	// The schedule in Cron format, see https://en.wikipedia.org/wiki/Cron.
+	Schedule string `json:"schedule"`
+
+	// Entrypoint array. Not executed within a shell.
+	// The container image's ENTRYPOINT is used if this is not provided.
+	// Variable references $(VAR_NAME) are expanded using the container's environment. If a variable
+	// cannot be resolved, the reference in the input string will be unchanged. Double $$ are reduced
+	// to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e. "$$(VAR_NAME)" will
+	// produce the string literal "$(VAR_NAME)". Escaped references will never be expanded, regardless
+	// of whether the variable exists or not.
+	// More info: https://kubernetes.io/docs/tasks/inject-data-application/define-command-argument-container/#running-a-command-in-a-shell
+	// +optional
+	Command []string `json:"command,omitempty"`
+
+	// Arguments to the entrypoint.
+	// The container image's CMD is used if this is not provided.
+	// Variable references $(VAR_NAME) are expanded using the container's environment. If a variable
+	// cannot be resolved, the reference in the input string will be unchanged. Double $$ are reduced
+	// to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e. "$$(VAR_NAME)" will
+	// produce the string literal "$(VAR_NAME)". Escaped references will never be expanded, regardless
+	// of whether the variable exists or not.
+	// More info: https://kubernetes.io/docs/tasks/inject-data-application/define-command-argument-container/#running-a-command-in-a-shell
+	// +optional
+	Args []string `json:"args,omitempty"`
+
+	// Compute Resources required by this container.
+	// More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
 const (

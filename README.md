@@ -120,6 +120,10 @@ spec:
   - apiGroup: "rbac.authorization.k8s.io"
     kind: "Role"
     name: "my-role"
+  cronJobs:
+  - name: "daily-job"
+    schedule: "@daily"
+    command: ["/bin/the-daily-thing"]
 ```
 
 </details>

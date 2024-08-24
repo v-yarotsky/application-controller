@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -103,6 +104,14 @@ func TestApplicationController(t *testing.T) {
 							},
 						},
 						MountPath: "/data",
+					},
+				},
+
+				CronJobs: []yarotskymev1alpha1.CronJobSpec{
+					{
+						Name:     "dailyjob",
+						Schedule: "@daily",
+						Command:  []string{"/bin/the-daily-thing"},
 					},
 				},
 			},
@@ -288,9 +297,31 @@ func TestApplicationController(t *testing.T) {
 				},
 			}, pm.Spec.Selector)
 		})
+
+		// Create CronJobs
+		var cronJob batchv1.CronJob
+		EventuallyGetObject(t, mkName(app.Namespace, "app1-dailyjob"), &cronJob, func(t require.TestingT) {
+			assert.Equal(t, serviceAccountName.Name, cronJob.Spec.JobTemplate.Spec.Template.Spec.ServiceAccountName)
+
+			assert.True(t, slices.ContainsFunc(cronJob.Spec.JobTemplate.Spec.Template.Spec.Volumes, func(vol corev1.Volume) bool {
+				return vol.Name == "data" && vol.VolumeSource.PersistentVolumeClaim.ClaimName == "data"
+			}))
+
+			assert.Len(t, cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers, 1)
+			if len(cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers) != 1 {
+				return
+			}
+			c := cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers[0]
+			assert.Equal(t, imageRef.String(), c.Image)
+			assert.Len(t, c.Ports, 0)
+			assert.Contains(t, c.VolumeMounts, corev1.VolumeMount{
+				Name:      "data",
+				MountPath: "/data",
+			})
+		})
 	})
 
-	t.Run("Should update managed deployments when a new image is available", func(t *testing.T) {
+	t.Run("Should update managed deployments and cronjobs when a new image is available", func(t *testing.T) {
 		imageRef := registry.MustUpsertTag("app2", "latest")
 		app := makeApp("app2", imageRef)
 		appName := mkName(app.Namespace, app.Name)
@@ -299,10 +330,21 @@ func TestApplicationController(t *testing.T) {
 		deployName := mkName(app.Namespace, app.Name)
 		var deploy appsv1.Deployment
 
+		cronJobName := mkName(app.Namespace, "app2-dailyjob")
+		var cronJob batchv1.CronJob
+
 		// Create a deployment with the current image
 		EventuallyGetObject(t, deployName, &deploy, func(t require.TestingT) {
 			assert.Len(t, deploy.Spec.Template.Spec.Containers, 1)
 			assert.True(t, slices.ContainsFunc(deploy.Spec.Template.Spec.Containers, func(c corev1.Container) bool {
+				return c.Image == imageRef.String()
+			}))
+		})
+
+		// Create a CronJob with the current image
+		EventuallyGetObject(t, cronJobName, &cronJob, func(t require.TestingT) {
+			assert.Len(t, cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers, 1)
+			assert.True(t, slices.ContainsFunc(cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers, func(c corev1.Container) bool {
 				return c.Image == imageRef.String()
 			}))
 		})
@@ -314,6 +356,13 @@ func TestApplicationController(t *testing.T) {
 		EventuallyGetObject(t, deployName, &deploy, func(t require.TestingT) {
 			assert.Len(t, deploy.Spec.Template.Spec.Containers, 1)
 			assert.True(t, slices.ContainsFunc(deploy.Spec.Template.Spec.Containers, func(c corev1.Container) bool {
+				return c.Image == newImageDigestRef.String()
+			}))
+		})
+
+		EventuallyGetObject(t, cronJobName, &cronJob, func(t require.TestingT) {
+			assert.Len(t, cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers, 1)
+			assert.True(t, slices.ContainsFunc(cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers, func(c corev1.Container) bool {
 				return c.Image == newImageDigestRef.String()
 			}))
 		})
@@ -365,6 +414,36 @@ func TestApplicationController(t *testing.T) {
 		EventuallyGetObject(t, deployName, &deploy, func(t require.TestingT) {
 			assert.Len(t, deploy.Spec.Template.Spec.Containers, 1)
 			assert.True(t, slices.ContainsFunc(deploy.Spec.Template.Spec.Containers, func(c corev1.Container) bool {
+				return slices.Contains(c.Env, corev1.EnvVar{Name: "MY_ENV_VAR", Value: "FOO"})
+			}))
+		})
+	})
+
+	t.Run("Should update cronjobs when container configuration changes", func(t *testing.T) {
+		imageRef := registry.MustUpsertTag("app14", "latest")
+		app := makeApp("app14", imageRef)
+		require.NoError(t, k8sClient.Create(ctx, &app))
+
+		cronJobName := mkName(app.Namespace, "app14-dailyjob")
+		var cronJob batchv1.CronJob
+
+		// Create a CronJob
+		EventuallyGetObject(t, cronJobName, &cronJob)
+
+		// Update the Application
+		EventuallyUpdateApp(t, &app, func() {
+			app.Spec.Env = []corev1.EnvVar{
+				{
+					Name:  "MY_ENV_VAR",
+					Value: "FOO",
+				},
+			}
+		})
+
+		// Eventually update the CronJob
+		EventuallyGetObject(t, cronJobName, &cronJob, func(t require.TestingT) {
+			assert.Len(t, cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers, 1)
+			assert.True(t, slices.ContainsFunc(cronJob.Spec.JobTemplate.Spec.Template.Spec.Containers, func(c corev1.Container) bool {
 				return slices.Contains(c.Env, corev1.EnvVar{Name: "MY_ENV_VAR", Value: "FOO"})
 			}))
 		})
@@ -558,4 +637,25 @@ func TestApplicationController(t *testing.T) {
 		// Eventually removes the LoadBalancer Service
 		EventuallyNotFindObject(t, name, &svc)
 	})
+
+	t.Run("Should remove CronJobs", func(t *testing.T) {
+		imageRef := registry.MustUpsertTag("app13", "latest")
+		app := makeApp("app13", imageRef)
+		require.NoError(t, k8sClient.Create(ctx, &app))
+
+		var cj batchv1.CronJob
+		cjName := mkName(app.Namespace, "app13-dailyjob")
+
+		// Create the CronJobs
+		EventuallyGetObject(t, cjName, &cj)
+
+		// Update the Application
+		EventuallyUpdateApp(t, &app, func() {
+			app.Spec.CronJobs = []yarotskymev1alpha1.CronJobSpec{}
+		})
+
+		// Eventually remove the CronJobs
+		EventuallyNotFindObject(t, cjName, &cj)
+	})
+
 }
