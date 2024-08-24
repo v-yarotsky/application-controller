@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	appsv1k "k8s.io/kubernetes/pkg/apis/apps/v1"
+	"k8s.io/utils/ptr"
 )
 
 type deploymentMutator struct {
@@ -33,6 +34,7 @@ func (f *deploymentMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.
 		}
 
 		deploy.Spec.Strategy.Type = appsv1.RecreateDeploymentStrategyType
+		deploy.Spec.RevisionHistoryLimit = ptr.To[int32](5)
 
 		deploy.Spec.Template.ObjectMeta = metav1.ObjectMeta{
 			Labels: selectorLabels,
