@@ -80,6 +80,9 @@ func (f *cronJobMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.App
 				FSGroupChangePolicy: sc.FSGroupChangePolicy,
 			}
 		}
+
+		podTemplateSpec.RuntimeClassName = app.Spec.RuntimeClassName
+
 		return nil
 	}
 }

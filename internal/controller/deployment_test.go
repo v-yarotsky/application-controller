@@ -206,4 +206,16 @@ func TestDeploymentMutator(t *testing.T) {
 
 		assert.Equal(t, map[string]string{"foo": "bar"}, deploy.Spec.Template.Spec.NodeSelector)
 	})
+
+	t.Run(`sets runtimeClassName when specified`, func(t *testing.T) {
+		app := makeApp()
+		app.Spec.RuntimeClassName = ptr.To("foo")
+
+		var deploy appsv1.Deployment
+		err := makeMutator(&app).Mutate(context.TODO(), &app, &deploy)()
+		assert.NoError(t, err)
+
+		assert.NotNil(t, deploy.Spec.Template.Spec.RuntimeClassName)
+		assert.Equal(t, "foo", *deploy.Spec.Template.Spec.RuntimeClassName)
+	})
 }

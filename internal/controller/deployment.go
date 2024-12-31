@@ -96,6 +96,8 @@ func (f *deploymentMutator) Mutate(ctx context.Context, app *yarotskymev1alpha1.
 			}
 		}
 
+		podTemplateSpec.RuntimeClassName = app.Spec.RuntimeClassName
+
 		appsv1k.SetObjectDefaults_Deployment(deploy)
 		return nil
 	}

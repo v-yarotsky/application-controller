@@ -109,4 +109,16 @@ func TestCronJobMutator(t *testing.T) {
 		assert.Equal(t, app.Spec.Volumes[0].MountPath, containerSpec.VolumeMounts[0].MountPath)
 		assert.Equal(t, app.Spec.Volumes[0].Volume.Name, containerSpec.VolumeMounts[0].Name)
 	})
+
+	t.Run(`sets runtimeClassName when specified`, func(t *testing.T) {
+		app := makeApp()
+		app.Spec.RuntimeClassName = ptr.To("foo")
+
+		var cronJob batchv1.CronJob
+		err := makeMutator(&app).Mutate(context.TODO(), &app, &cronJob, app.Spec.CronJobs[0])()
+		assert.NoError(t, err)
+
+		assert.NotNil(t, cronJob.Spec.JobTemplate.Spec.Template.Spec.RuntimeClassName)
+		assert.Equal(t, "foo", *cronJob.Spec.JobTemplate.Spec.Template.Spec.RuntimeClassName)
+	})
 }

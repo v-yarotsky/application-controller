@@ -93,6 +93,14 @@ type ApplicationSpec struct {
 	// SecurityContext holds pod-level security attributes and container settings.
 	SecurityContext *SecurityContext `json:"securityContext,omitempty"`
 
+	// RuntimeClassName refers to a RuntimeClass object in the node.k8s.io group, which should be used
+	// to run this pod.  If no RuntimeClass resource matches the named class, the pod will not be run.
+	// If unset or empty, the "legacy" RuntimeClass will be used, which is an implicit class with an
+	// empty definition that uses the default runtime handler.
+	// More info: https://git.k8s.io/enhancements/keps/sig-node/585-runtime-class
+	// +optional
+	RuntimeClassName *string `json:"runtimeClassName,omitempty"`
+
 	// List of volumes to mount into the primary container.
 	// More info: https://kubernetes.io/docs/concepts/storage/volumes
 	// +optional
